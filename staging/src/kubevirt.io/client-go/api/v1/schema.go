@@ -404,7 +404,32 @@ type Devices struct {
 	// +optional
 	// +listType=atomic
 	HostDevices []HostDevice `json:"hostDevices,omitempty"`
+	// To configure and access client devices such as redirecting USB
+	// +optional
+	// +listType=atomic
+	ClientDevices []ClientDevice `json:"clientDevices,omitempty"`
 }
+
+// Represent a subset of client devices that can be accessed by VMI. At the
+// moment only, USB devices using Usbredir's library and tooling. Another fit
+// would be a smartcard with libcacard.
+//
+// +k8s:openapi-gen=true
+type ClientDevice struct {
+	// +optional
+	Usb *UsbClientDevice `json:"usb,omitempty"`
+}
+
+// Represents the configuration to USB redirection
+//
+// +k8s:openapi-gen=true
+type UsbClientDevice struct {
+	Name string `json:"name"`
+}
+
+const (
+	UsbClientDeviceMaxNumberOf = 4
+)
 
 //
 // +k8s:openapi-gen=true

@@ -1390,6 +1390,43 @@ var _ = Describe("Converter", func() {
 			Expect(domain.Spec.Devices.Inputs[0].Bus).To(Equal("usb"), "Expect usb bus")
 		})
 
+		It("should enable usb redirection when number of USB client devices > 0", func() {
+			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+			clientDeviceArray := make([]v1.ClientDevice, 2)
+			clientDeviceArray[0] = v1.ClientDevice{Name: "webcam"}
+			clientDeviceArray[1] = v1.ClientDevice{Name: "pendrive"}
+			vmi.Spec.Domain.Devices.ClientDevices = clientDeviceArray
+			domain := vmiToDomain(vmi, c)
+			Expect(len(domain.Spec.Devices.Redirs)).To(Equal(2))
+		})
+
+		It("should reject usb redirection there is devices with the same name", func() {
+			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+			clientDeviceArray := make([]v1.ClientDevice, 2)
+			clientDeviceArray[0] = v1.ClientDevice{Name: "webcam"}
+			clientDeviceArray[1] = v1.ClientDevice{Name: "webcam"}
+			vmi.Spec.Domain.Devices.ClientDevices = clientDeviceArray
+			Expect(Convert_v1_VirtualMachine_To_api_Domain(vmi, &api.Domain{}, c)).ToNot(Succeed(), "Name of USB devices must be unique.")
+		})
+
+		It("should not enable usb redirection when numberOfDevices == 0", func() {
+			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+			vmi.Spec.Domain.Devices.ClientDevices = make([]v1.ClientDevice, 0)
+			domain := vmiToDomain(vmi, c)
+			Expect(domain.Spec.Devices.Redirs).To(BeNil())
+		})
+
+		It("should not enable usb redirection when numberOfDevices > limit", func() {
+			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+			clientDeviceArray := make([]v1.ClientDevice, v1.UsbClientDeviceMaxNumberOf+1)
+			// We will add one more than the limit
+			for i := 0; i <= v1.UsbClientDeviceMaxNumberOf; i++ {
+				clientDeviceArray[i] = v1.ClientDevice{Name: fmt.Sprintf("webcam-%v", i)}
+			}
+			vmi.Spec.Domain.Devices.ClientDevices = clientDeviceArray
+			Expect(Convert_v1_VirtualMachine_To_api_Domain(vmi, &api.Domain{}, c)).ToNot(Succeed(), "exceeds the maximum allowed")
+		})
+
 		It("should select explicitly chosen network model", func() {
 			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
 			vmi.Spec.Domain.Devices.Interfaces[0].Model = "e1000"

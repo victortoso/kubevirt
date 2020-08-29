@@ -682,7 +682,47 @@ func Convert_v1_Rng_To_api_Rng(_ *v1.Rng, rng *api.Rng, c *ConverterContext) err
 	return nil
 }
 
-func Convert_v1_Input_To_api_InputDevice(input *v1.Input, inputDevice *api.Input, c *ConverterContext) error {
+func Convert_v1_Usbredir_To_api_Usbredir(vmi *v1.VirtualMachineInstance, domainDevices *api.Devices, c *ConverterContext) (bool, error) {
+	clientDevices := vmi.Spec.Domain.Devices.ClientDevices
+
+	// Default is to have USB Redirection disabled
+	if clientDevices == nil || len(clientDevices) <= 0 {
+		return false, nil
+	}
+
+	numberOfDevices := len(clientDevices)
+
+	if numberOfDevices > v1.UsbClientDeviceMaxNumberOf {
+		err := fmt.Errorf("Number of USB devices (%v) exceeds the maximum allowed (%v)", numberOfDevices, v1.UsbClientDeviceMaxNumberOf)
+		return false, err
+	} else {
+		// Check if name is unique
+		names := make(map[string]int)
+		for i, dev := range clientDevices {
+			if _, exists := names[dev.Usb.Name]; exists {
+				err := fmt.Errorf("Name of USB devices must be unique. The Name %v is repeated.", dev.Usb.Name)
+				return false, err
+			}
+			names[dev.Usb.Name] = i
+		}
+	}
+
+	redirectDevices := make([]api.Redirected, numberOfDevices)
+	for i := 0; i < numberOfDevices; i++ {
+		redirectDevices[i] = api.Redirected{
+			Type: "unix",
+			Bus:  "usb",
+			Source: api.RedirectedSource{
+				Mode: "bind",
+				Path: fmt.Sprintf("/var/run/kubevirt-private/%s/virt-usbredir-%s", vmi.ObjectMeta.UID, clientDevices[i].Usb.Name),
+			},
+		}
+	}
+	domainDevices.Redirs = redirectDevices
+	return true, nil
+}
+
+func Convert_v1_Input_To_api_InputDevice(input *v1.Input, inputDevice *api.Input, _ *ConverterContext) error {
 	if input.Bus != "virtio" && input.Bus != "usb" && input.Bus != "" {
 		return fmt.Errorf("input contains unsupported bus %s", input.Bus)
 	}
@@ -1293,6 +1333,11 @@ func Convert_v1_VirtualMachine_To_api_Domain(vmi *v1.VirtualMachineInstance, dom
 		domain.Spec.Devices.Inputs = inputDevices
 	}
 
+	isUSBRedirEnabled, err := Convert_v1_Usbredir_To_api_Usbredir(vmi, &domain.Spec.Devices, c)
+	if err != nil {
+		return err
+	}
+
 	domain.Spec.Devices.Ballooning = &api.MemBalloon{}
 	ConvertV1ToAPIBalloning(&vmi.Spec.Domain.Devices, domain.Spec.Devices.Ballooning, c)
 
@@ -1301,7 +1346,7 @@ func Convert_v1_VirtualMachine_To_api_Domain(vmi *v1.VirtualMachineInstance, dom
 	//In ppc64le usb devices like mouse / keyboard are set by default,
 	//so we can't disable the controller otherwise we run into the following error:
 	//"unsupported configuration: USB is disabled for this domain, but USB devices are present in the domain XML"
-	if !isUSBDevicePresent && c.Architecture != "ppc64le" {
+	if !isUSBDevicePresent && !isUSBRedirEnabled && c.Architecture != "ppc64le" {
 		// disable usb controller
 		domain.Spec.Devices.Controllers = append(domain.Spec.Devices.Controllers, api.Controller{
 			Type:  "usb",

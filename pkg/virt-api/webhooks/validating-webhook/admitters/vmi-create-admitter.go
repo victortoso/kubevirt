@@ -1615,6 +1615,7 @@ func validateVolumes(field *k8sfield.Path, volumes []v1.Volume, config *virtconf
 func validateDevices(field *k8sfield.Path, devices *v1.Devices) []metav1.StatusCause {
 	var causes []metav1.StatusCause
 	causes = append(causes, validateDisks(field.Child("disks"), devices.Disks)...)
+	causes = append(causes, validateClientDevices(field.Child("clientDevices"), devices.ClientDevices)...)
 	return causes
 }
 
@@ -1631,6 +1632,43 @@ func getNumberOfPodInterfaces(spec *v1.VirtualMachineInstanceSpec) int {
 		}
 	}
 	return nPodInterfaces
+}
+
+func validateClientDevices(field *k8sfield.Path, clientDevices []v1.ClientDevice) []metav1.StatusCause {
+	var causes []metav1.StatusCause
+
+	if len(clientDevices) == 0 {
+		// That's fine as this is optional
+		return nil
+	} else if len(clientDevices) < 0 {
+		causes = append(causes, metav1.StatusCause{
+			Type:    metav1.CauseTypeFieldValueInvalid,
+			Message: fmt.Sprintf("%s does not support negative values", field.String()),
+			Field:   field.String(),
+		})
+	} else if len(clientDevices) > v1.UsbClientDeviceMaxNumberOf {
+		causes = append(causes, metav1.StatusCause{
+			Type:    metav1.CauseTypeFieldValueNotSupported,
+			Message: fmt.Sprintf("%s does not values above %v", field.String(), v1.UsbClientDeviceMaxNumberOf),
+			Field:   field.String(),
+		})
+	}
+
+	// Verify if names are unique
+	names := make(map[string]int)
+	for i, dev := range clientDevices {
+		if j, exists := names[dev.Usb.Name]; exists {
+			causes = append(causes, metav1.StatusCause{
+				Type:    metav1.CauseTypeFieldValueInvalid,
+				Message: fmt.Sprintf("%s and %s must not have the same Name.", field.Index(i).String(), field.Index(j).String()),
+				Field:   field.Index(i).Child("name").String(),
+			})
+		} else {
+			names[dev.Usb.Name] = i
+		}
+	}
+
+	return causes
 }
 
 func validateDisks(field *k8sfield.Path, disks []v1.Disk) []metav1.StatusCause {
