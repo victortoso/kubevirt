@@ -20,6 +20,7 @@
 package rest
 
 import (
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -45,6 +46,12 @@ type ConsoleHandler struct {
 	serialLock           *sync.Mutex
 	vncLock              *sync.Mutex
 	vmiInformer          cache.SharedIndexInformer
+	usbredir             map[types.UID]UsbredirHandlerVMI
+}
+
+type UsbredirHandlerVMI struct {
+	lock      *sync.Mutex
+	stopChans map[string](chan struct{})
 }
 
 func NewConsoleHandler(podIsolationDetector isolation.PodIsolationDetector, vmiInformer cache.SharedIndexInformer) *ConsoleHandler {
@@ -55,7 +62,68 @@ func NewConsoleHandler(podIsolationDetector isolation.PodIsolationDetector, vmiI
 		serialLock:           &sync.Mutex{},
 		vncLock:              &sync.Mutex{},
 		vmiInformer:          vmiInformer,
+		usbredir:             make(map[types.UID]UsbredirHandlerVMI),
 	}
+}
+
+func (t *ConsoleHandler) USBRedirHandler(request *restful.Request, response *restful.Response) {
+	vmi, code, err := getVMI(request, t.vmiInformer)
+	if err != nil {
+		log.Log.Object(vmi).Reason(err).Error("Failed to retrieve VMI")
+		response.WriteError(code, err)
+		return
+	}
+
+	/*
+		FIXME: Doesn't work. The Query parameter is shown in virt-api logs
+		(e.g: /usbredir?usb-name=webcam) but it doesn't reach virt-handler.
+	*/
+	usbNameArg := request.QueryParameter("usb-name")
+	log.Log.Object(vmi).Infof("Request: %v", request)
+	if len(usbNameArg) == 0 {
+		log.Log.Object(vmi).Reason(err).Error("Lacking resource id: USB device name is needed")
+		response.WriteError(http.StatusTooManyRequests, err)
+		return
+	}
+
+	uid := vmi.GetUID()
+	if _, exists := t.usbredir[uid]; !exists {
+		// Initialization
+		t.usbredir[uid] = UsbredirHandlerVMI{
+			lock: &sync.Mutex{},
+		}
+	}
+
+	// To be on the safe side, we hande one request at time per VMI
+	usbHandler := t.usbredir[uid]
+	usbHandler.lock.Lock()
+	defer usbHandler.lock.Unlock()
+
+	if _, exists := usbHandler.stopChans[usbNameArg]; exists {
+		log.Log.Object(vmi).Reason(err).Errorf("USB Redir device named %s is being used", usbNameArg)
+		response.WriteError(http.StatusTooManyRequests, err)
+		return
+	}
+
+	unixSocketPath, err := t.getUnixSocketPath(vmi, fmt.Sprintf("virt-usbredir-%s", usbNameArg))
+	if err != nil {
+		log.Log.Object(vmi).Reason(err).Error("Failed on finding unix socket for USBRedir")
+		response.WriteError(http.StatusBadRequest, err)
+		return
+	}
+
+	stopChan := make(chan struct{})
+	usbHandler.stopChans[usbNameArg] = stopChan
+	cleanup := func() {
+		usbHandler.lock.Lock()
+		defer usbHandler.lock.Unlock()
+		// delete the stop channel from the cache if needed
+		if _, exists := usbHandler.stopChans[usbNameArg]; exists {
+			close(stopChan)
+			delete(usbHandler.stopChans, usbNameArg)
+		}
+	}
+	t.stream(vmi, request, response, unixSocketPath, stopChan, cleanup)
 }
 
 func (t *ConsoleHandler) VNCHandler(request *restful.Request, response *restful.Response) {

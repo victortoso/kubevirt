@@ -163,6 +163,23 @@ func (app *SubresourceAPIApp) putRequestHandler(request *restful.Request, respon
 	}
 }
 
+func (app *SubresourceAPIApp) USBRedirRequestHandler(request *restful.Request, response *restful.Response) {
+	validate := func(vmi *v1.VirtualMachineInstance) *errors.StatusError {
+		condManager := controller.NewVirtualMachineInstanceConditionManager()
+		if condManager.HasCondition(vmi, v1.VirtualMachineInstancePaused) {
+			return errors.NewConflict(v1.Resource("virtualmachineinstance"), vmi.Name, fmt.Errorf("VMI is paused"))
+		}
+		if len(vmi.Spec.Domain.Devices.ClientDevices) <= 0 {
+			return errors.NewConflict(v1.Resource("virtualmachineinstance"), vmi.Name, fmt.Errorf("Not configured with USB Redirection"))
+		}
+		return nil
+	}
+	getConsoleURL := func(vmi *v1.VirtualMachineInstance, conn kubecli.VirtHandlerConn) (string, error) {
+		return conn.USBRedirURI(vmi)
+	}
+	app.streamRequestHandler(request, response, validate, getConsoleURL)
+}
+
 func (app *SubresourceAPIApp) VNCRequestHandler(request *restful.Request, response *restful.Response) {
 	validate := func(vmi *v1.VirtualMachineInstance) *errors.StatusError {
 		// If there are no graphics devices present, we can't proceed

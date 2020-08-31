@@ -140,11 +140,17 @@ func RequestFromConfig(config *rest.Config, vmi string, namespace string, resour
 		return nil, fmt.Errorf("Unsupported Protocol %s", u.Scheme)
 	}
 
+	/*
+		FIXME: This is just a hardcoded hack to test passing query argument usb-name for usbredir.
+		The code needs to be better handled to accomodate passing an argument.
+	*/
+	u.RawQuery = fmt.Sprintf("usb-name=%s", "webcam")
 	u.Path = fmt.Sprintf("/apis/subresources.kubevirt.io/%s/namespaces/%s/virtualmachineinstances/%s/%s", v1.ApiStorageVersion, namespace, vmi, resource)
 	req := &http.Request{
 		Method: http.MethodGet,
 		URL:    u,
 	}
+	log.Log.Infof("URL: %v", req.URL.String())
 
 	return req, nil
 }
@@ -173,6 +179,10 @@ func (ws *wsStreamer) Stream(options StreamOptions) error {
 
 	defer ws.streamDone()
 	return <-copyErr
+}
+
+func (v *vmis) USBRedir(name string) (StreamInterface, error) {
+	return v.asyncSubresourceHelper(name, "usbredir")
 }
 
 func (v *vmis) VNC(name string) (StreamInterface, error) {

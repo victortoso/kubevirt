@@ -155,6 +155,7 @@ type VirtualMachineInstanceInterface interface {
 	Delete(name string, options *k8smetav1.DeleteOptions) error
 	Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1.VirtualMachineInstance, err error)
 	SerialConsole(name string, options *SerialConsoleOptions) (StreamInterface, error)
+	USBRedir(name string) (StreamInterface, error)
 	VNC(name string) (StreamInterface, error)
 	Pause(name string) error
 	Unpause(name string) error

@@ -262,6 +262,14 @@ func (app *virtAPIApp) composeSubresources() {
 			Operation(version.Version + "VNC").
 			Doc("Open a websocket connection to connect to VNC on the specified VirtualMachineInstance."))
 
+		subws.Route(subws.GET(rest.ResourcePath(subresourcesvmiGVR) + rest.SubResourcePath("usbredir")).
+			To(subresourceApp.USBRedirRequestHandler).
+			Param(rest.NamespaceParam(subws)).
+			Param(rest.NameParam(subws)).
+			Param(rest.NameUsbParam(subws)).
+			Operation(version.Version + "usbredir").
+			Doc("Open a websocket connection to connect to USB device on the specified VirtualMachineInstance."))
+
 		// An empty handler function would respond with HTTP OK by default
 		subws.Route(subws.GET(rest.ResourcePath(subresourcesvmiGVR) + rest.SubResourcePath("test")).
 			To(func(request *restful.Request, response *restful.Response) {}).

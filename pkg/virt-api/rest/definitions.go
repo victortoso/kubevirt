@@ -329,6 +329,10 @@ func NamespaceParam(ws *restful.WebService) *restful.Parameter {
 	return ws.PathParameter("namespace", "Object name and auth scope, such as for teams and projects").Required(true)
 }
 
+func NameUsbParam(ws *restful.WebService) *restful.Parameter {
+	return ws.QueryParameter("usb-name", "Name of USB device client wishes to connect to.")
+}
+
 func labelSelectorParam(ws *restful.WebService) *restful.Parameter {
 	return ws.QueryParameter("labelSelector", "A selector to restrict the list of returned objects by their labels. Defaults to everything")
 }
