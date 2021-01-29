@@ -9084,6 +9084,15 @@
      }
     }
    },
+   "v1.ClientDevice": {
+    "description": "Represent a subset of client devices that can be accessed by VMI. At the moment only, USB devices using Usbredir's library and tooling. Another fit would be a smartcard with libcacard.",
+    "type": "object",
+    "properties": {
+     "usb": {
+      "$ref": "#/definitions/v1.UsbClientDevice"
+     }
+    }
+   },
    "v1.Clock": {
     "description": "Represents the clock and timers of a vmi.",
     "type": "object",
@@ -9405,6 +9414,14 @@
      "blockMultiQueue": {
       "description": "Whether or not to enable virtio multi-queue for block devices",
       "type": "boolean"
+     },
+     "clientDevices": {
+      "description": "To configure and access client devices such as redirecting USB",
+      "type": "array",
+      "items": {
+       "$ref": "#/definitions/v1.ClientDevice"
+      },
+      "x-kubernetes-list-type": "atomic"
      },
      "disableHotplug": {
       "description": "DisableHotplug disabled the ability to hotplug disks.",
@@ -10858,6 +10875,18 @@
      "rtc": {
       "description": "RTC (Real Time Clock) - a continuously running timer with periodic interrupts.",
       "$ref": "#/definitions/v1.RTCTimer"
+     }
+    }
+   },
+   "v1.UsbClientDevice": {
+    "description": "Represents the configuration to USB redirection",
+    "type": "object",
+    "required": [
+     "name"
+    ],
+    "properties": {
+     "name": {
+      "type": "string"
      }
     }
    },

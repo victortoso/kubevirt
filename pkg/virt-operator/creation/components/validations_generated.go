@@ -2098,6 +2098,22 @@ var CRDsValidation map[string]string = map[string]string{
                         blockMultiQueue:
                           description: Whether or not to enable virtio multi-queue for block devices
                           type: boolean
+                        clientDevices:
+                          description: To configure and access client devices such as redirecting USB
+                          items:
+                            description: Represent a subset of client devices that can be accessed by VMI. At the moment only, USB devices using Usbredir's library and tooling. Another fit would be a smartcard with libcacard.
+                            properties:
+                              usb:
+                                description: Represents the configuration to USB redirection
+                                properties:
+                                  name:
+                                    type: string
+                                required:
+                                - name
+                                type: object
+                            type: object
+                          type: array
+                          x-kubernetes-list-type: atomic
                         disableHotplug:
                           description: DisableHotplug disabled the ability to hotplug disks.
                           type: boolean
@@ -3872,6 +3888,22 @@ var CRDsValidation map[string]string = map[string]string{
                 blockMultiQueue:
                   description: Whether or not to enable virtio multi-queue for block devices
                   type: boolean
+                clientDevices:
+                  description: To configure and access client devices such as redirecting USB
+                  items:
+                    description: Represent a subset of client devices that can be accessed by VMI. At the moment only, USB devices using Usbredir's library and tooling. Another fit would be a smartcard with libcacard.
+                    properties:
+                      usb:
+                        description: Represents the configuration to USB redirection
+                        properties:
+                          name:
+                            type: string
+                        required:
+                        - name
+                        type: object
+                    type: object
+                  type: array
+                  x-kubernetes-list-type: atomic
                 disableHotplug:
                   description: DisableHotplug disabled the ability to hotplug disks.
                   type: boolean
@@ -5239,6 +5271,22 @@ var CRDsValidation map[string]string = map[string]string{
                 blockMultiQueue:
                   description: Whether or not to enable virtio multi-queue for block devices
                   type: boolean
+                clientDevices:
+                  description: To configure and access client devices such as redirecting USB
+                  items:
+                    description: Represent a subset of client devices that can be accessed by VMI. At the moment only, USB devices using Usbredir's library and tooling. Another fit would be a smartcard with libcacard.
+                    properties:
+                      usb:
+                        description: Represents the configuration to USB redirection
+                        properties:
+                          name:
+                            type: string
+                        required:
+                        - name
+                        type: object
+                    type: object
+                  type: array
+                  x-kubernetes-list-type: atomic
                 disableHotplug:
                   description: DisableHotplug disabled the ability to hotplug disks.
                   type: boolean
@@ -6403,6 +6451,22 @@ var CRDsValidation map[string]string = map[string]string{
                         blockMultiQueue:
                           description: Whether or not to enable virtio multi-queue for block devices
                           type: boolean
+                        clientDevices:
+                          description: To configure and access client devices such as redirecting USB
+                          items:
+                            description: Represent a subset of client devices that can be accessed by VMI. At the moment only, USB devices using Usbredir's library and tooling. Another fit would be a smartcard with libcacard.
+                            properties:
+                              usb:
+                                description: Represents the configuration to USB redirection
+                                properties:
+                                  name:
+                                    type: string
+                                required:
+                                - name
+                                type: object
+                            type: object
+                          type: array
+                          x-kubernetes-list-type: atomic
                         disableHotplug:
                           description: DisableHotplug disabled the ability to hotplug disks.
                           type: boolean
@@ -8462,6 +8526,22 @@ var CRDsValidation map[string]string = map[string]string{
                                     blockMultiQueue:
                                       description: Whether or not to enable virtio multi-queue for block devices
                                       type: boolean
+                                    clientDevices:
+                                      description: To configure and access client devices such as redirecting USB
+                                      items:
+                                        description: Represent a subset of client devices that can be accessed by VMI. At the moment only, USB devices using Usbredir's library and tooling. Another fit would be a smartcard with libcacard.
+                                        properties:
+                                          usb:
+                                            description: Represents the configuration to USB redirection
+                                            properties:
+                                              name:
+                                                type: string
+                                            required:
+                                            - name
+                                            type: object
+                                        type: object
+                                      type: array
+                                      x-kubernetes-list-type: atomic
                                     disableHotplug:
                                       description: DisableHotplug disabled the ability to hotplug disks.
                                       type: boolean

@@ -298,6 +298,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"kubevirt.io/client-go/api/v1.CPU":                                                        schema_kubevirtio_client_go_api_v1_CPU(ref),
 		"kubevirt.io/client-go/api/v1.CPUFeature":                                                 schema_kubevirtio_client_go_api_v1_CPUFeature(ref),
 		"kubevirt.io/client-go/api/v1.Chassis":                                                    schema_kubevirtio_client_go_api_v1_Chassis(ref),
+		"kubevirt.io/client-go/api/v1.ClientDevice":                                               schema_kubevirtio_client_go_api_v1_ClientDevice(ref),
 		"kubevirt.io/client-go/api/v1.Clock":                                                      schema_kubevirtio_client_go_api_v1_Clock(ref),
 		"kubevirt.io/client-go/api/v1.ClockOffset":                                                schema_kubevirtio_client_go_api_v1_ClockOffset(ref),
 		"kubevirt.io/client-go/api/v1.ClockOffsetUTC":                                             schema_kubevirtio_client_go_api_v1_ClockOffsetUTC(ref),
@@ -392,6 +393,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"kubevirt.io/client-go/api/v1.SecretVolumeSource":                                         schema_kubevirtio_client_go_api_v1_SecretVolumeSource(ref),
 		"kubevirt.io/client-go/api/v1.ServiceAccountVolumeSource":                                 schema_kubevirtio_client_go_api_v1_ServiceAccountVolumeSource(ref),
 		"kubevirt.io/client-go/api/v1.Timer":                                                      schema_kubevirtio_client_go_api_v1_Timer(ref),
+		"kubevirt.io/client-go/api/v1.UsbClientDevice":                                            schema_kubevirtio_client_go_api_v1_UsbClientDevice(ref),
 		"kubevirt.io/client-go/api/v1.UserPasswordAccessCredential":                               schema_kubevirtio_client_go_api_v1_UserPasswordAccessCredential(ref),
 		"kubevirt.io/client-go/api/v1.UserPasswordAccessCredentialPropagationMethod":              schema_kubevirtio_client_go_api_v1_UserPasswordAccessCredentialPropagationMethod(ref),
 		"kubevirt.io/client-go/api/v1.UserPasswordAccessCredentialSource":                         schema_kubevirtio_client_go_api_v1_UserPasswordAccessCredentialSource(ref),
@@ -13829,6 +13831,26 @@ func schema_kubevirtio_client_go_api_v1_Chassis(ref common.ReferenceCallback) co
 	}
 }
 
+func schema_kubevirtio_client_go_api_v1_ClientDevice(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "Represent a subset of client devices that can be accessed by VMI. At the moment only, USB devices using Usbredir's library and tooling. Another fit would be a smartcard with libcacard.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"usb": {
+						SchemaProps: spec.SchemaProps{
+							Ref: ref("kubevirt.io/client-go/api/v1.UsbClientDevice"),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			"kubevirt.io/client-go/api/v1.UsbClientDevice"},
+	}
+}
+
 func schema_kubevirtio_client_go_api_v1_Clock(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -14592,11 +14614,29 @@ func schema_kubevirtio_client_go_api_v1_Devices(ref common.ReferenceCallback) co
 							},
 						},
 					},
+					"clientDevices": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "To configure and access client devices such as redirecting USB",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref("kubevirt.io/client-go/api/v1.ClientDevice"),
+									},
+								},
+							},
+						},
+					},
 				},
 			},
 		},
 		Dependencies: []string{
-			"kubevirt.io/client-go/api/v1.Disk", "kubevirt.io/client-go/api/v1.Filesystem", "kubevirt.io/client-go/api/v1.GPU", "kubevirt.io/client-go/api/v1.HostDevice", "kubevirt.io/client-go/api/v1.Input", "kubevirt.io/client-go/api/v1.Interface", "kubevirt.io/client-go/api/v1.Rng", "kubevirt.io/client-go/api/v1.Watchdog"},
+			"kubevirt.io/client-go/api/v1.ClientDevice", "kubevirt.io/client-go/api/v1.Disk", "kubevirt.io/client-go/api/v1.Filesystem", "kubevirt.io/client-go/api/v1.GPU", "kubevirt.io/client-go/api/v1.HostDevice", "kubevirt.io/client-go/api/v1.Input", "kubevirt.io/client-go/api/v1.Interface", "kubevirt.io/client-go/api/v1.Rng", "kubevirt.io/client-go/api/v1.Watchdog"},
 	}
 }
 
@@ -17276,6 +17316,26 @@ func schema_kubevirtio_client_go_api_v1_Timer(ref common.ReferenceCallback) comm
 		},
 		Dependencies: []string{
 			"kubevirt.io/client-go/api/v1.HPETTimer", "kubevirt.io/client-go/api/v1.HypervTimer", "kubevirt.io/client-go/api/v1.KVMTimer", "kubevirt.io/client-go/api/v1.PITTimer", "kubevirt.io/client-go/api/v1.RTCTimer"},
+	}
+}
+
+func schema_kubevirtio_client_go_api_v1_UsbClientDevice(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "Represents the configuration to USB redirection",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
+						},
+					},
+				},
+				Required: []string{"name"},
+			},
+		},
 	}
 }
 

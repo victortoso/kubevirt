@@ -192,6 +192,20 @@ func (Devices) SwaggerDoc() map[string]string {
 		"gpus":                       "Whether to attach a GPU device to the vmi.\n+optional\n+listType=atomic",
 		"filesystems":                "Filesystems describes filesystem which is connected to the vmi.\n+optional\n+listType=atomic",
 		"hostDevices":                "Whether to attach a host device to the vmi.\n+optional\n+listType=atomic",
+		"clientDevices":              "To configure and access client devices such as redirecting USB\n+optional\n+listType=atomic",
+	}
+}
+
+func (ClientDevice) SwaggerDoc() map[string]string {
+	return map[string]string{
+		"":    "Represent a subset of client devices that can be accessed by VMI. At the\nmoment only, USB devices using Usbredir's library and tooling. Another fit\nwould be a smartcard with libcacard.\n\n+k8s:openapi-gen=true",
+		"usb": "+optional",
+	}
+}
+
+func (UsbClientDevice) SwaggerDoc() map[string]string {
+	return map[string]string{
+		"": "Represents the configuration to USB redirection\n\n+k8s:openapi-gen=true",
 	}
 }
 
