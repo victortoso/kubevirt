@@ -20,6 +20,7 @@
 package rest
 
 import (
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -45,6 +46,12 @@ type ConsoleHandler struct {
 	serialLock           *sync.Mutex
 	vncLock              *sync.Mutex
 	vmiInformer          cache.SharedIndexInformer
+	usbredir             map[types.UID]UsbredirHandlerVMI
+	usbredirLock         *sync.Mutex
+}
+
+type UsbredirHandlerVMI struct {
+	stopChans map[int](chan struct{})
 }
 
 func NewConsoleHandler(podIsolationDetector isolation.PodIsolationDetector, vmiInformer cache.SharedIndexInformer) *ConsoleHandler {
@@ -54,8 +61,67 @@ func NewConsoleHandler(podIsolationDetector isolation.PodIsolationDetector, vmiI
 		vncStopChans:         make(map[types.UID](chan struct{})),
 		serialLock:           &sync.Mutex{},
 		vncLock:              &sync.Mutex{},
+		usbredirLock:         &sync.Mutex{},
 		vmiInformer:          vmiInformer,
+		usbredir:             make(map[types.UID]UsbredirHandlerVMI),
 	}
+}
+
+func (t *ConsoleHandler) USBRedirHandler(request *restful.Request, response *restful.Response) {
+	vmi, code, err := getVMI(request, t.vmiInformer)
+	if err != nil {
+		log.Log.Object(vmi).Reason(err).Error("Failed to retrieve VMI")
+		response.WriteError(code, err)
+		return
+	}
+
+	// For simplicity, we handle one usbredir request at the time, for all VMIs
+	// handled by virt-handler
+	t.usbredirLock.Lock()
+	defer t.usbredirLock.Unlock()
+
+	uid := vmi.GetUID()
+	if _, exists := t.usbredir[uid]; !exists {
+		// Initialize
+		t.usbredir[uid] = UsbredirHandlerVMI{
+			stopChans: make(map[int](chan struct{})),
+		}
+	}
+
+	usbHandler := t.usbredir[uid]
+	// Find the first USB device slot available
+	var slotId int
+	for slotId = 0; slotId < v1.UsbClientPassthroughMaxNumberOf; slotId++ {
+		if _, inUse := usbHandler.stopChans[slotId]; !inUse {
+			break
+		}
+	}
+
+	if slotId == v1.UsbClientPassthroughMaxNumberOf {
+		log.Log.Object(vmi).Reason(err).Errorf("All USB devices are in use.")
+		response.WriteError(http.StatusServiceUnavailable, err)
+		return
+	}
+
+	unixSocketPath, err := t.getUnixSocketPath(vmi, fmt.Sprintf("virt-usbredir-%d", slotId))
+	if err != nil {
+		log.Log.Object(vmi).Reason(err).Error("Failed on finding unix socket for USBRedir")
+		response.WriteError(http.StatusBadRequest, err)
+		return
+	}
+
+	stopChan := make(chan struct{})
+	usbHandler.stopChans[slotId] = stopChan
+	cleanup := func() {
+		t.usbredirLock.Lock()
+		defer t.usbredirLock.Unlock()
+		delete(usbHandler.stopChans, slotId)
+	}
+
+	// Small workaround with lock in order to properly use defer
+	t.usbredirLock.Unlock()
+	t.stream(vmi, request, response, unixSocketPath, stopChan, cleanup)
+	t.usbredirLock.Lock()
 }
 
 func (t *ConsoleHandler) VNCHandler(request *restful.Request, response *restful.Response) {

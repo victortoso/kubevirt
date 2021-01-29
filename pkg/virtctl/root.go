@@ -15,6 +15,7 @@ import (
 	"kubevirt.io/kubevirt/pkg/virtctl/imageupload"
 	"kubevirt.io/kubevirt/pkg/virtctl/pause"
 	"kubevirt.io/kubevirt/pkg/virtctl/templates"
+	"kubevirt.io/kubevirt/pkg/virtctl/usbredir"
 	"kubevirt.io/kubevirt/pkg/virtctl/version"
 	"kubevirt.io/kubevirt/pkg/virtctl/vm"
 	"kubevirt.io/kubevirt/pkg/virtctl/vnc"
@@ -67,6 +68,7 @@ func NewVirtctlCommand() *cobra.Command {
 	rootCmd.SetUsageTemplate(templates.MainUsageTemplate())
 	rootCmd.AddCommand(
 		console.NewCommand(clientConfig),
+		usbredir.NewCommand(clientConfig),
 		vnc.NewCommand(clientConfig),
 		vm.NewStartCommand(clientConfig),
 		vm.NewStopCommand(clientConfig),

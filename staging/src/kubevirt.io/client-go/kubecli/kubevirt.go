@@ -165,6 +165,7 @@ type VirtualMachineInstanceInterface interface {
 	Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1.VirtualMachineInstance, err error)
 	Watch(opts metav1.ListOptions) (watch.Interface, error)
 	SerialConsole(name string, options *SerialConsoleOptions) (StreamInterface, error)
+	USBRedir(vmiName string) (StreamInterface, error)
 	VNC(name string) (StreamInterface, error)
 	Pause(name string) error
 	Unpause(name string) error

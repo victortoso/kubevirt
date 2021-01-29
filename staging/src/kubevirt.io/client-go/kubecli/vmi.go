@@ -161,7 +161,6 @@ type wsStreamer struct {
 func (ws *wsStreamer) streamDone() {
 	close(ws.done)
 }
-
 func (ws *wsStreamer) Stream(options StreamOptions) error {
 	copyErr := make(chan error, 1)
 
@@ -177,6 +176,10 @@ func (ws *wsStreamer) Stream(options StreamOptions) error {
 
 	defer ws.streamDone()
 	return <-copyErr
+}
+
+func (v *vmis) USBRedir(vmiName string) (StreamInterface, error) {
+	return v.asyncSubresourceHelper(vmiName, "usbredir")
 }
 
 func (v *vmis) VNC(name string) (StreamInterface, error) {
