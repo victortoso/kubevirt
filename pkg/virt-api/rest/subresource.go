@@ -171,7 +171,7 @@ func (app *SubresourceAPIApp) USBRedirRequestHandler(request *restful.Request, r
 		if condManager.HasCondition(vmi, v1.VirtualMachineInstancePaused) {
 			return errors.NewConflict(v1.Resource("virtualmachineinstance"), vmi.Name, fmt.Errorf("VMI is paused"))
 		}
-		if len(vmi.Spec.Domain.Devices.ClientPassthrough) <= 0 {
+		if vmi.Spec.Domain.Devices.ClientPassthrough == nil {
 			return errors.NewConflict(v1.Resource("virtualmachineinstance"), vmi.Name, fmt.Errorf("Not configured with USB Redirection"))
 		}
 		return nil
