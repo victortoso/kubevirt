@@ -72,7 +72,21 @@ func (usbredirCmd *usbredirCommand) Run(command *cobra.Command, args []string) e
 		return err
 	}
 
+	if args[0] == "list-connections" {
+		return requestConnectedDevices(virtCli, namespace, args[1])
+	}
+
 	return redirectDevice(virtCli, namespace, args[0], args[1])
+}
+
+func requestConnectedDevices(virtCli kubecli.KubevirtClient, namespace, vmiArg string) error {
+	// Get connection to the websocket for usbredir subresource
+	usbredirInfo, err := virtCli.VirtualMachineInstance(namespace).USBRedirInfo(vmiArg)
+	if err != nil {
+		return fmt.Errorf("Can't access VMI %s: %s", vmiArg, err.Error())
+	}
+	fmt.Println(usbredirInfo)
+	return nil
 }
 
 func redirectDevice(virtCli kubecli.KubevirtClient, namespace, usbdeviceArg, vmiArg string) error {

@@ -165,6 +165,13 @@ func (v *vmis) USBRedir(name string) (StreamInterface, error) {
 	return asyncSubresourceHelper(v.config, v.resource, v.namespace, name, "usbredir")
 }
 
+func (v *vmis) USBRedirInfo(name string) (v1.VirtualMachineInstanceUSBRedirInfo, error) {
+	info := v1.VirtualMachineInstanceUSBRedirInfo{}
+	uri := fmt.Sprintf(v.config, v.resource, v.namespace, name, "usbredirinfo")
+	err := v.restClient.Get().RequestURI(uri).Do(context.Background()).Into(&info)
+	return info, err
+}
+
 func (v *vmis) VNC(name string) (StreamInterface, error) {
 	return asyncSubresourceHelper(v.config, v.resource, v.namespace, name, "vnc")
 }

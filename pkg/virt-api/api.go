@@ -327,6 +327,16 @@ func (app *virtAPIApp) composeSubresources() {
 			Operation(version.Version + "usbredir").
 			Doc("Open a websocket connection to connect to USB device on the specified VirtualMachineInstance."))
 
+		subws.Route(subws.GET(rest.NamespacedResourcePath(subresourcesvmiGVR)+rest.SubResourcePath("usbredirinfo")).
+			To(subresourceApp.USBRedirInfoRequestHandler).
+			Param(rest.NamespaceParam(subws)).
+			Param(rest.NameParam(subws)).
+			Produces(restful.MIME_JSON).
+			Operation(version.Version+"usbredirinfo").
+			Doc("Query for information of usbredir connections of specified VirtualMachineInstance.").
+			Writes(v1.VirtualMachineInstanceUSBRedirInfo{}).
+			Returns(http.StatusOK, "OK", v1.VirtualMachineInstanceUSBRedirInfo{}))
+
 		// VMI endpoint
 		subws.Route(subws.GET(rest.NamespacedResourcePath(subresourcesvmiGVR) + rest.SubResourcePath("portforward") + rest.PortPath).
 			To(subresourceApp.PortForwardRequestHandler(subresourceApp.FetchVirtualMachineInstance)).

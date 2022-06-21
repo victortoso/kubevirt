@@ -1982,6 +1982,15 @@ type GuestAgentCommandInfo struct {
 	Enabled bool   `json:"enabled,omitempty"`
 }
 
+// List of USBRedir connections with relevant information of connected devices
+type VirtualMachineInstanceUSBRedirInfo struct {
+	Items []VirtualMachineInstanceUSBRedirConnectionInfo `json:"items,omitempty"`
+}
+
+type VirtualMachineInstanceUSBRedirConnectionInfo struct {
+	Connected bool `json:"connected"`
+}
+
 // VirtualMachineInstanceGuestOSUserList comprises the list of all active users on guest machine
 //
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

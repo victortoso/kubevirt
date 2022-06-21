@@ -132,6 +132,34 @@ func (t *ConsoleHandler) USBRedirHandler(request *restful.Request, response *res
 	t.stream(vmi, request, response, unixSocketPath, stopChan)
 }
 
+func (t *ConsoleHandler) USBRedirInfoHandler(request *restful.Request, response *restful.Response) {
+	// Get VMI
+	vmi, code, err := getVMI(request, t.vmiInformer)
+	if err != nil {
+		log.Log.Object(vmi).Reason(err).Error(failedRetrieveVMI)
+		response.WriteError(code, err)
+		return
+	}
+
+	// Initialize response
+	info := VirtualMachineInstanceUSBRedirInfo{}
+	info.Items = make([]VirtualMachineInstanceUSBRedirConnectionInfo, v1.UsbClientPassthroughMaxNumberOf)
+
+	// Get source of truth
+	uid := vmi.GetUID()
+	usbHandler, exists := t.usbredir[uid]
+	if !exists {
+		response.WriteEntity(info)
+	}
+
+	for slotId := 0; slotId < v1.UsbClientPassthroughMaxNumberOf; slotId++ {
+		_, inUse := usbHandler.stopChans[slotId]
+		info.Items[slotId].Connected = inUse
+	}
+
+	response.WriteEntity(info)
+}
+
 func (t *ConsoleHandler) VNCHandler(request *restful.Request, response *restful.Response) {
 	vmi, code, err := getVMI(request, t.vmiInformer)
 	if err != nil {

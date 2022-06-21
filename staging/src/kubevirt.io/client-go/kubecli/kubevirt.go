@@ -219,6 +219,7 @@ type VirtualMachineInstanceInterface interface {
 	Watch(opts metav1.ListOptions) (watch.Interface, error)
 	SerialConsole(name string, options *SerialConsoleOptions) (StreamInterface, error)
 	USBRedir(vmiName string) (StreamInterface, error)
+	USBRedirInfo(vmiName string) (v1.VirtualMachineInstanceUSBRedirInfo, error)
 	VNC(name string) (StreamInterface, error)
 	PortForward(name string, port int, protocol string) (StreamInterface, error)
 	Pause(name string, pauseOptions *v1.PauseOptions) error

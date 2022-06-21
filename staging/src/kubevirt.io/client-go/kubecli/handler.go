@@ -24,6 +24,7 @@ const (
 	consoleTemplateURI        = "wss://%s:%v/v1/namespaces/%s/virtualmachineinstances/%s/console"
 	usbredirTemplateURI       = "wss://%s:%v/v1/namespaces/%s/virtualmachineinstances/%s/usbredir"
 	vncTemplateURI            = "wss://%s:%v/v1/namespaces/%s/virtualmachineinstances/%s/vnc"
+	usbredirInfoTemplateURI   = "https://%s:%v/v1/namespaces/%s/virtualmachineinstances/%s/usbredirinfo"
 	pauseTemplateURI          = "https://%s:%v/v1/namespaces/%s/virtualmachineinstances/%s/pause"
 	unpauseTemplateURI        = "https://%s:%v/v1/namespaces/%s/virtualmachineinstances/%s/unpause"
 	freezeTemplateURI         = "https://%s:%v/v1/namespaces/%s/virtualmachineinstances/%s/freeze"
@@ -166,6 +167,10 @@ func (v *virtHandlerConn) ConsoleURI(vmi *virtv1.VirtualMachineInstance) (string
 
 func (v *virtHandlerConn) USBRedirURI(vmi *virtv1.VirtualMachineInstance) (string, error) {
 	return v.formatURI(usbredirTemplateURI, vmi)
+}
+
+func (v *virtHandlerConn) USBRedirInfoURI(vmi *virtv1.VirtualMachineInstance) (string, error) {
+	return v.formatURI(usbredirInfoTemplateURI, vmi)
 }
 
 func (v *virtHandlerConn) VNCURI(vmi *virtv1.VirtualMachineInstance) (string, error) {

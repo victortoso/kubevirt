@@ -26,6 +26,14 @@ func (app *SubresourceAPIApp) USBRedirRequestHandler(request *restful.Request, r
 	streamer.Handle(request, response)
 }
 
+func (app *SubresourceAPIApp) USBRedirInfoRequestHandler(request *restful.Request, response *restful.Response) {
+	getURL := func(vmi *v1.VirtualMachineInstance, conn kubecli.VirtHandlerConn) (string, error) {
+		return conn.USBRedirInfoURI(vmi)
+	}
+
+	app.httpGetRequestHandler(request, response, validateVMIForUSBRedir, getURL, v1.VirtualMachineInstanceUSBRedirInfo{})
+}
+
 func validateVMIForUSBRedir(vmi *v1.VirtualMachineInstance) *errors.StatusError {
 	if vmi.Spec.Domain.Devices.ClientPassthrough == nil {
 		return errors.NewConflict(v1.Resource("virtualmachineinstance"), vmi.Name, fmt.Errorf("Not configured with USB Redirection"))
