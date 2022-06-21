@@ -72,9 +72,10 @@ func (usbredirCmd *usbredirCommand) Run(command *cobra.Command, args []string) e
 		return err
 	}
 
-	vmiArg := args[1]
-	usbdeviceArg := args[0]
+	return redirectDevice(virtCli, namespace, args[0], args[1])
+}
 
+func redirectDevice(virtCli kubecli.KubevirtClient, namespace, usbdeviceArg, vmiArg string) error {
 	// Get connection to the websocket for usbredir subresource
 	usbredirVMI, err := virtCli.VirtualMachineInstance(namespace).USBRedir(vmiArg)
 	if err != nil {
