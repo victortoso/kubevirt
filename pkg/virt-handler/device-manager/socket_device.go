@@ -115,7 +115,7 @@ func (dpi *SocketDevicePlugin) Start(stop <-chan struct{}) (err error) {
 		errChan <- dpi.server.Serve(sock)
 	}()
 
-	err = waitForGRPCServer(dpi.pluginSocketPath, connectionTimeout)
+	err = WaitForGRPCServer(dpi.pluginSocketPath, connectionTimeout)
 	if err != nil {
 		return fmt.Errorf("error starting the GRPC server: %v", err)
 	}

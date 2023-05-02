@@ -202,7 +202,7 @@ func initHandler() {
 	}
 }
 
-func waitForGRPCServer(socketPath string, timeout time.Duration) error {
+func WaitForGRPCServer(socketPath string, timeout time.Duration) error {
 	conn, err := gRPCConnect(socketPath, timeout)
 	if err != nil {
 		return err
