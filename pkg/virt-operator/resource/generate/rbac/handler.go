@@ -27,6 +27,8 @@ import (
 
 	virtv1 "kubevirt.io/api/core/v1"
 	"kubevirt.io/api/migrations"
+	"kubevirt.io/api/usb"
+	"kubevirt.io/api/usb/v1alpha1"
 
 	"kubevirt.io/kubevirt/pkg/virt-operator/resource/generate/components"
 )
@@ -154,6 +156,19 @@ func newHandlerClusterRole() *rbacv1.ClusterRole {
 				},
 				Verbs: []string{
 					"get", "list", "watch",
+				},
+			},
+			{
+				APIGroups: []string{
+					usb.GroupName,
+				},
+				Resources: []string{
+					v1alpha1.ResourceNodeConfigPlural,
+				},
+				Verbs: []string{
+					"get",
+					"list",
+					"watch",
 				},
 			},
 		},

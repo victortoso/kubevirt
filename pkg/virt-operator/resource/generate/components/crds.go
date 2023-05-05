@@ -31,6 +31,7 @@ import (
 	"kubevirt.io/api/migrations"
 
 	migrationsv1 "kubevirt.io/api/migrations/v1alpha1"
+	usbv1alpha1 "kubevirt.io/api/usb/v1alpha1"
 
 	schedulingv1 "k8s.io/api/scheduling/v1"
 	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -67,6 +68,7 @@ var (
 	VIRTUALMACHINEEXPORT             = "virtualmachineexports." + exportv1.SchemeGroupVersion.Group
 	MIGRATIONPOLICY                  = "migrationpolicies." + migrationsv1.MigrationPolicyKind.Group
 	VIRTUALMACHINECLONE              = "virtualmachineclones." + clonev1alpha1.VirtualMachineCloneKind.Group
+	NODECONFIG                       = "nodeconfigs." + usbv1alpha1.SchemeGroupVersion.Group
 	PreserveUnknownFieldsFalse       = false
 )
 
@@ -870,4 +872,36 @@ func NewKubeVirtPriorityClassCR() *schedulingv1.PriorityClass {
 		GlobalDefault: false,
 		Description:   "This priority class should be used for KubeVirt core components only.",
 	}
+}
+
+func NewNodeConfigCrd() (*extv1.CustomResourceDefinition, error) {
+	crd := newBlankCrd()
+
+	crd.ObjectMeta.Name = NODECONFIG
+	crd.Spec = extv1.CustomResourceDefinitionSpec{
+		Group: usbv1alpha1.SchemeGroupVersion.Group,
+		Versions: []extv1.CustomResourceDefinitionVersion{
+			{
+				Name:    usbv1alpha1.SchemeGroupVersion.Version,
+				Served:  true,
+				Storage: true,
+			},
+		},
+		Scope: extv1.ClusterScoped,
+
+		Names: extv1.CustomResourceDefinitionNames{
+			Plural:     usbv1alpha1.ResourceNodeConfigPlural,
+			Singular:   usbv1alpha1.ResourceNodeConfigSingular,
+			ShortNames: []string{usbv1alpha1.ResourceNodeConfigSingular, usbv1alpha1.ResourceNodeConfigPlural},
+			Kind:       usbv1alpha1.SchemeGroupVersionKind.Kind,
+			Categories: []string{
+				"all",
+			},
+		},
+	}
+
+	if err := patchValidationForAllVersions(crd); err != nil {
+		return nil, err
+	}
+	return crd, nil
 }

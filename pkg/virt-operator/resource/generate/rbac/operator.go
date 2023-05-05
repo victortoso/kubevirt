@@ -83,6 +83,19 @@ func NewOperatorClusterRole() *rbacv1.ClusterRole {
 		Rules: []rbacv1.PolicyRule{
 			{
 				APIGroups: []string{
+					"usb.kubevirt.io",
+				},
+				Resources: []string{
+					"nodeconfigs",
+				},
+				Verbs: []string{
+					"get",
+					"list",
+					"watch",
+				},
+			},
+			{
+				APIGroups: []string{
 					"kubevirt.io",
 				},
 				Resources: []string{
