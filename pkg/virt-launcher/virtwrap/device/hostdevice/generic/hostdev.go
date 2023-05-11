@@ -26,6 +26,7 @@ import (
 
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/device/hostdevice"
+	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/device/hostdevice/usb"
 )
 
 const (
@@ -53,6 +54,13 @@ func CreateHostDevicesFromPools(vmiHostDevices []v1.HostDevice, pciAddressPool, 
 	}
 
 	hostDevices := append(pciHostDevices, mdevHostDevices...)
+
+	usbHostDevices, err := usb.CreateHostDevices(vmiHostDevices)
+	if err != nil {
+		return nil, err
+	}
+
+	hostDevices = append(hostDevices, usbHostDevices...)
 
 	if err := validateCreationOfAllDevices(vmiHostDevices, hostDevices); err != nil {
 		return nil, fmt.Errorf(failedCreateGenericHostDevicesFmt, err)

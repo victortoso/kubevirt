@@ -40,6 +40,7 @@ import (
 	"kubevirt.io/kubevirt/pkg/pointer"
 
 	"kubevirt.io/kubevirt/pkg/virt-controller/watch/topology"
+	"kubevirt.io/kubevirt/pkg/virt-handler/device-manager/usb"
 	"kubevirt.io/kubevirt/pkg/virt-handler/selinux"
 	"kubevirt.io/kubevirt/pkg/virtiofs"
 
@@ -192,6 +193,7 @@ func NewController(
 	migrationProxy migrationproxy.ProxyManager,
 	capabilities *nodelabellerapi.Capabilities,
 	hostCpuModel string,
+	nodeConfigInformer cache.SharedIndexInformer,
 ) (*VirtualMachineController, error) {
 
 	queue := workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "virt-handler-vm")
@@ -284,6 +286,9 @@ func NewController(
 		device_manager.PermanentHostDevicePlugins(maxDevices, permissions),
 		clusterConfig,
 		clientset.CoreV1())
+
+	c.usbManager = usb.NewUSBManager(nodeConfigInformer)
+
 	c.heartBeat = heartbeat.NewHeartBeat(clientset.CoreV1(), c.deviceManagerController, clusterConfig, host)
 
 	return c, nil
@@ -305,6 +310,7 @@ type VirtualMachineController struct {
 	heartBeatInterval        time.Duration
 	watchdogTimeoutSeconds   int
 	deviceManagerController  *device_manager.DeviceController
+	usbManager               usb.USBManagerInterface
 	migrationProxy           migrationproxy.ProxyManager
 	podIsolationDetector     isolation.PodIsolationDetector
 	containerDiskMounter     container_disk.Mounter
@@ -1514,6 +1520,7 @@ func (c *VirtualMachineController) Run(threadiness int, stopCh chan struct{}) {
 	log.Log.Info("Starting virt-handler controller.")
 
 	go c.deviceManagerController.Run(stopCh)
+	go c.usbManager.Run(stopCh)
 
 	cache.WaitForCacheSync(stopCh, c.domainInformer.HasSynced, c.vmiSourceInformer.HasSynced, c.vmiTargetInformer.HasSynced, c.gracefulShutdownInformer.HasSynced)
 
