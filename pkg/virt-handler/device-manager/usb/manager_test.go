@@ -12,6 +12,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	framework "k8s.io/client-go/tools/cache/testing"
 	"kubevirt.io/api/usb/v1alpha1"
+
 	"kubevirt.io/kubevirt/pkg/testutils"
 )
 

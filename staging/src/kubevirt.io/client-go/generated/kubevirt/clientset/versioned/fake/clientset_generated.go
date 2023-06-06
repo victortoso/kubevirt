@@ -41,6 +41,8 @@ import (
 	fakepoolv1alpha1 "kubevirt.io/client-go/generated/kubevirt/clientset/versioned/typed/pool/v1alpha1/fake"
 	snapshotv1alpha1 "kubevirt.io/client-go/generated/kubevirt/clientset/versioned/typed/snapshot/v1alpha1"
 	fakesnapshotv1alpha1 "kubevirt.io/client-go/generated/kubevirt/clientset/versioned/typed/snapshot/v1alpha1/fake"
+	usbv1alpha1 "kubevirt.io/client-go/generated/kubevirt/clientset/versioned/typed/usb/v1alpha1"
+	fakeusbv1alpha1 "kubevirt.io/client-go/generated/kubevirt/clientset/versioned/typed/usb/v1alpha1/fake"
 )
 
 // NewSimpleClientset returns a clientset that will respond with the provided objects.
@@ -128,4 +130,9 @@ func (c *Clientset) PoolV1alpha1() poolv1alpha1.PoolV1alpha1Interface {
 // SnapshotV1alpha1 retrieves the SnapshotV1alpha1Client
 func (c *Clientset) SnapshotV1alpha1() snapshotv1alpha1.SnapshotV1alpha1Interface {
 	return &fakesnapshotv1alpha1.FakeSnapshotV1alpha1{Fake: &c.Fake}
+}
+
+// UsbV1alpha1 retrieves the UsbV1alpha1Client
+func (c *Clientset) UsbV1alpha1() usbv1alpha1.UsbV1alpha1Interface {
+	return &fakeusbv1alpha1.FakeUsbV1alpha1{Fake: &c.Fake}
 }

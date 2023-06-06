@@ -1,0 +1,44 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "go_default_library",
+    srcs = [
+        "manager.go",
+        "manager_setup.go",
+        "usb_device.go",
+    ],
+    importpath = "kubevirt.io/kubevirt/pkg/virt-handler/device-manager/usb",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pkg/controller:go_default_library",
+        "//pkg/safepath:go_default_library",
+        "//pkg/util:go_default_library",
+        "//pkg/virt-handler/device-manager:go_default_library",
+        "//pkg/virt-handler/device-manager/deviceplugin/v1beta1:go_default_library",
+        "//staging/src/kubevirt.io/api/usb/v1alpha1:go_default_library",
+        "//staging/src/kubevirt.io/client-go/log:go_default_library",
+        "//vendor/k8s.io/apimachinery/pkg/util/wait:go_default_library",
+        "//vendor/k8s.io/client-go/tools/cache:go_default_library",
+        "//vendor/k8s.io/client-go/util/workqueue:go_default_library",
+        "@org_golang_google_grpc//:go_default_library",
+    ],
+)
+
+go_test(
+    name = "go_default_test",
+    srcs = [
+        "manager_suite_test.go",
+        "manager_test.go",
+    ],
+    embed = [":go_default_library"],
+    deps = [
+        "//pkg/testutils:go_default_library",
+        "//staging/src/kubevirt.io/api/usb/v1alpha1:go_default_library",
+        "//staging/src/kubevirt.io/client-go/testutils:go_default_library",
+        "//vendor/github.com/onsi/ginkgo/v2:go_default_library",
+        "//vendor/github.com/onsi/gomega:go_default_library",
+        "//vendor/k8s.io/apimachinery/pkg/apis/meta/v1:go_default_library",
+        "//vendor/k8s.io/client-go/tools/cache:go_default_library",
+        "//vendor/k8s.io/client-go/tools/cache/testing:go_default_library",
+    ],
+)
