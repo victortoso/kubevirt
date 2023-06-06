@@ -88,6 +88,14 @@ metadata:
   name: kubevirt-operator
 rules:
 - apiGroups:
+  - usb.kubevirt.io
+  resources:
+  - nodeconfigs
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - kubevirt.io
   resources:
   - kubevirts
@@ -759,6 +767,14 @@ rules:
   - migrations.kubevirt.io
   resources:
   - migrationpolicies
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - usb.kubevirt.io
+  resources:
+  - nodeconfigs
   verbs:
   - get
   - list

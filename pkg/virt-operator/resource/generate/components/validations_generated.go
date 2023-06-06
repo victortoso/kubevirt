@@ -3521,6 +3521,53 @@ var CRDsValidation map[string]string = map[string]string{
   - spec
   type: object
 `,
+	"nodeconfig": `openAPIV3Schema:
+  description: NodeConfig represents a subset of Node resources that we want to expose
+    to virtual machines.
+  properties:
+    apiVersion:
+      description: 'APIVersion defines the versioned schema of this representation
+        of an object. Servers should convert recognized schemas to the latest internal
+        value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+      type: string
+    kind:
+      description: 'Kind is a string value representing the REST resource this object
+        represents. Servers may infer this from the endpoint the client submits requests
+        to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+      type: string
+    metadata:
+      type: object
+    spec:
+      properties:
+        usb:
+          properties:
+            resourceName:
+              description: 'The resource name which identifies the list of USB host
+                devices. e.g: kubevirt.io/storage for generic storages or kubevirt.io/bootable-usb'
+              type: string
+            usbHostDevices:
+              items:
+                properties:
+                  selectByVendorProduct:
+                    description: 'The vendor:product of the devices we want to select.
+                      e.g: "0951:1666"'
+                    type: string
+                required:
+                - selectByVendorProduct
+                type: object
+              type: array
+              x-kubernetes-list-type: atomic
+          required:
+          - resourceName
+          type: object
+      type: object
+    status:
+      description: TODO
+      type: object
+  required:
+  - spec
+  type: object
+`,
 	"virtualmachine": `openAPIV3Schema:
   description: VirtualMachine handles the VirtualMachines that are not running or
     are in a stopped state The VirtualMachine contains the template to create the
