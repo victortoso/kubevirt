@@ -78,6 +78,7 @@ const (
 	VmiGPU               = "vmi-gpu"
 	VmiARM               = "vmi-arm"
 	VmiMacvtap           = "vmi-macvtap"
+	VmiUSB               = "vmi-usb"
 	VmTemplateFedora     = "vm-template-fedora"
 	VmTemplateRHEL7      = "vm-template-rhel7"
 	VmTemplateWindows    = "vm-template-windows2012r2"
@@ -1222,6 +1223,20 @@ func GetVMIARM() *v1.VirtualMachineInstance {
 	addContainerDisk(&vmi.Spec, fmt.Sprintf(strFmt, DockerPrefix, imageCirros, DockerTag), v1.DiskBusVirtio)
 	addNoCloudDisk(&vmi.Spec)
 	addEmptyDisk(&vmi.Spec, "2Gi")
+	return vmi
+}
+
+func GetVMIUSB() *v1.VirtualMachineInstance {
+	vmi := getBaseVMI(VmiUSB)
+	vmi.Spec.Domain.Resources.Requests[k8sv1.ResourceMemory] = resource.MustParse("1024M")
+	initFedora(&vmi.Spec)
+	addNoCloudDiskWitUserData(&vmi.Spec, generateCloudConfigString(cloudConfigUserPassword, cloudConfigInstallAndStartService))
+
+	vmi.Spec.Domain.Devices.HostDevices = append(vmi.Spec.Domain.Devices.HostDevices,
+		v1.HostDevice{
+			Name:       "storage",
+			DeviceName: "kubevirt.io/webcam",
+		})
 	return vmi
 }
 

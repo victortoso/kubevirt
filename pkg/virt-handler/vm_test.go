@@ -69,6 +69,7 @@ import (
 	notifyclient "kubevirt.io/kubevirt/pkg/virt-launcher/notify-client"
 
 	v1 "kubevirt.io/api/core/v1"
+	usbv1alpha1 "kubevirt.io/api/usb/v1alpha1"
 	"kubevirt.io/client-go/kubecli"
 	"kubevirt.io/client-go/precond"
 
@@ -92,6 +93,7 @@ var _ = Describe("VirtualMachineInstance", func() {
 	var controller *VirtualMachineController
 	var vmiSource *framework.FakeControllerSource
 	var vmiSourceInformer cache.SharedIndexInformer
+	var nodeConfigInformer cache.SharedIndexInformer
 	var vmiTargetInformer cache.SharedIndexInformer
 	var domainSource *framework.FakeControllerSource
 	var domainInformer cache.SharedIndexInformer
@@ -168,6 +170,7 @@ var _ = Describe("VirtualMachineInstance", func() {
 
 		Expect(err).ToNot(HaveOccurred())
 
+		nodeConfigInformer, _ = testutils.NewFakeInformerFor(&usbv1alpha1.NodeConfig{})
 		vmiSourceInformer, vmiSource = testutils.NewFakeInformerFor(&v1.VirtualMachineInstance{})
 		vmiTargetInformer, _ = testutils.NewFakeInformerFor(&v1.VirtualMachineInstance{})
 		domainInformer, domainSource = testutils.NewFakeInformerFor(&api.Domain{})
@@ -223,6 +226,7 @@ var _ = Describe("VirtualMachineInstance", func() {
 			migrationProxy,
 			nil,
 			"",
+			nodeConfigInformer,
 		)
 		controller.hotplugVolumeMounter = mockHotplugVolumeMounter
 		controller.virtLauncherFSRunDirPattern = filepath.Join(shareDir, "%d")
