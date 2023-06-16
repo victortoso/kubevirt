@@ -96,6 +96,7 @@ launcherbase_main="
 launcherbase_x86_64="
   edk2-ovmf-${EDK2_VERSION}
   qemu-kvm-device-usb-redirect-${QEMU_VERSION}
+  qemu-kvm-device-usb-host-${QEMU_VERSION}
   seabios-${SEABIOS_VERSION}
 "
 launcherbase_aarch64="
