@@ -1199,6 +1199,11 @@ func isUSBNeeded(c *ConverterContext, vmi *v1.VirtualMachineInstance) bool {
 		return true
 	}
 
+	// USB passthrough is under HostDevices
+	if len(vmi.Spec.Domain.Devices.HostDevices) != 0 {
+		return true
+	}
+
 	return false
 }
 
