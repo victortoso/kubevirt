@@ -21,12 +21,94 @@ type USBManagerInterface interface {
 	Run(stopCh chan struct{})
 }
 
+func newState() state {
+	return state{
+		resourceNameToPluginHandler: map[string]*pluginHandler{},
+		nodeconfigToResource:        map[string]string{},
+		lock:                        sync.Mutex{},
+	}
+}
+
+type state struct {
+	resourceNameToPluginHandler map[string]*pluginHandler
+	nodeconfigToResource        map[string]string
+	lock                        sync.Mutex
+}
+
+func (s *state) insert(nodeConfig string, plugin Plugin) chan struct{} {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	if _, alreadyExists := s.nodeconfigToResource[nodeConfig]; alreadyExists {
+		log.Log.Infof("Could not insert %s: Already exists", nodeConfig)
+		return nil
+	}
+	close := make(chan struct{})
+	resourceName := plugin.Name()
+
+	s.nodeconfigToResource[nodeConfig] = resourceName
+	s.resourceNameToPluginHandler[resourceName] = &pluginHandler{
+		started:  false,
+		failed:   false,
+		stopChan: close,
+		plugin:   plugin,
+	}
+	log.Log.Infof("Insert %s into manager's state", nodeConfig)
+	return close
+}
+
+func (s *state) clean(nodeConfig string) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	resourceName, configInState := s.nodeconfigToResource[nodeConfig]
+	if !configInState {
+		return
+	}
+
+	handler := s.resourceNameToPluginHandler[resourceName]
+	close(handler.stopChan)
+
+	delete(s.nodeconfigToResource, nodeConfig)
+	delete(s.resourceNameToPluginHandler, resourceName)
+	log.Log.Infof("Removed %s", nodeConfig)
+}
+
+func (s *state) list() []string {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	ret := make([]string, len(s.nodeconfigToResource))
+	for nodeConfig := range s.nodeconfigToResource {
+		ret = append(ret, nodeConfig)
+	}
+	return ret
+}
+
+func (s *state) updateHandler(resourceName string, started bool) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	handler, exist := s.resourceNameToPluginHandler[resourceName]
+	if !exist {
+		log.Log.Warningf("Failed to update %s: resource no longer exists", resourceName)
+		return
+	}
+
+	if started {
+		handler.started = true
+	} else {
+		handler.failed = true
+	}
+}
+
 type USBManager struct {
 	nodeConfigInformer cache.SharedIndexInformer
 	queue              workqueue.RateLimitingInterface
 	discoveryFunc      func() []*usbDevice
-	handlers           map[string]pluginHandler
-	handlersLock       sync.Mutex
+	factoryFunc        factory
+	state              state
+	logger             *log.FilteredLogger
 }
 
 type pluginHandler struct {
@@ -47,15 +129,38 @@ func NewUSBManager(nodeConfigInformer cache.SharedIndexInformer) *USBManager {
 	manager := &USBManager{
 		nodeConfigInformer: nodeConfigInformer,
 		queue:              queue,
-		handlers:           make(map[string]pluginHandler),
 		discoveryFunc:      discoverUSBDevices,
+		factoryFunc:        NewUSBDevicePlugin,
+		state:              newState(),
+		logger:             log.Log.With("subcomponent", "usb-manager"),
 	}
 	nodeConfigInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    manager.addFunc,
 		UpdateFunc: manager.updateFunc,
 		DeleteFunc: manager.deleteFunc,
 	})
+
 	return manager
+}
+
+func (manager *USBManager) cleanUpWorker(stop chan struct{}) func() {
+	return func() {
+		t := time.NewTicker(5 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				for _, nodeConfig := range manager.state.list() {
+					if _, exists, _ := manager.nodeConfigInformer.GetIndexer().GetByKey(nodeConfig); !exists {
+						manager.logger.Infof("Cleaning up plugin for %s node config", nodeConfig)
+						manager.state.clean(nodeConfig)
+					}
+				}
+			case <-stop:
+				return
+			}
+		}
+	}
 }
 
 func (manager *USBManager) Run(stopCh chan struct{}) {
@@ -67,6 +172,8 @@ func (manager *USBManager) Run(stopCh chan struct{}) {
 
 	// Start the actual work
 	go wait.Until(manager.runWorker, time.Second, stopCh)
+	// TODO this might be to much
+	go wait.Until(manager.cleanUpWorker(stopCh), time.Second, stopCh)
 	log.Log.Info("Started USB manager")
 
 	<-stopCh
@@ -101,15 +208,18 @@ func (manager *USBManager) execute(key string) error {
 		return fmt.Errorf("failed to get object for key %s, %v", key, err)
 	}
 
-	log.Log.Infof("[toso debug] execute: %s exists %t", key, exists)
-
 	if !exists || obj == nil {
-		// TODO clean old conf?
+		log.Log.Infof("Removing %s (exists: %t) (is nil: %t)", key, exists, obj == nil)
+		manager.state.clean(key)
 		return nil
 	}
 
+	// If key already exists, cleanup before proceeding
+	manager.state.clean(key)
+
+	log.Log.Infof("Iterating over %s", key)
 	nodeConfig := obj.(*v1alpha1.NodeConfig)
-	return manager.syncDevicePlugin(nodeConfig)
+	return manager.syncDevicePlugin(nodeConfig, key)
 }
 
 func constructPermittedUSBDevicesMap(nodeConfig *v1alpha1.NodeConfig) map[int][]usbDeviceSelector {
@@ -149,7 +259,7 @@ func constructPermittedUSBDevicesMap(nodeConfig *v1alpha1.NodeConfig) map[int][]
 	return permittedUSBDevices
 }
 
-func (manager *USBManager) syncDevicePlugin(nodeConfig *v1alpha1.NodeConfig) error {
+func (manager *USBManager) syncDevicePlugin(nodeConfig *v1alpha1.NodeConfig, key string) error {
 	log.Log.Infof("%s sync", nodeConfig.Name)
 
 	// Sanity check
@@ -190,68 +300,61 @@ func (manager *USBManager) syncDevicePlugin(nodeConfig *v1alpha1.NodeConfig) err
 	}
 
 	for resourceName, devices := range devicesToExport {
-		plugin := NewUSBDevicePlugin(resourceName, devices)
-		if handle, exists := manager.handlers[plugin.Name()]; exists {
-			if handle.started && !handle.failed {
-				// Plugin is working as intended
-				// TODO: Check if the devices changed (added or removed)
-				continue
-			}
-			// Retry plugin that failed to start
-			delete(manager.handlers, plugin.Name())
-		}
-		manager.startPlugin(plugin)
+		log.Log.Infof("%s has %d devices", resourceName, len(devices))
+		plugin := manager.factoryFunc(resourceName, devices)
+		manager.startPlugin(plugin, key)
 	}
 	return nil
 }
 
-func (manager *USBManager) startPlugin(plugin Plugin) {
-	manager.handlersLock.Lock()
-	defer manager.handlersLock.Unlock()
-
-	logger := log.DefaultLogger()
-	if _, exists := manager.handlers[plugin.Name()]; exists {
-		logger.Warningf("Trying to start device that has already started: %s", plugin.Name())
+func (manager *USBManager) startPlugin(plugin Plugin, key string) {
+	var stop chan struct{}
+	if stop = manager.state.insert(key, plugin); stop == nil {
+		// No changes in NodeConfig
+		log.Log.V(9).Infof("USB plugin %s is already started", plugin.Name())
 		return
 	}
 
 	log.Log.Infof("USB pluggin %s starting", plugin.Name())
+	go manager.startUpPlugin(plugin, stop)
+}
 
-	handler := pluginHandler{
-		stopChan: make(chan struct{}),
-		plugin:   plugin,
+func (manager *USBManager) startUpPlugin(plugin Plugin, stop chan struct{}) {
+	retries := 0
+
+	tryStartPlugin := func() bool {
+		err := plugin.Start(stop)
+		if err == nil {
+			log.DefaultLogger().Infof("Started %s USB pluggin.", plugin.Name())
+			return true
+		}
+		log.DefaultLogger().Reason(err).Errorf("Error starting %s USB pluggin. Retry #%d",
+			plugin.Name(), retries)
+
+		return false
 	}
 
-	go func() {
-		retries := 0
-		for {
-			err := plugin.Start(handler.stopChan)
-			if err == nil {
-				handler.started = true
-				logger.Reason(err).Infof("Started %s USB pluggin.", plugin.Name())
-				return
-			}
-			retries++
-			if retries > 10 {
-				logger.Reason(err).Errorf("Unable to start %s USB pluggin", plugin.Name())
-				handler.failed = true
-				return
-			}
-
-			logger.Reason(err).Errorf("Error starting %s USB pluggin. Retry #%d",
-				plugin.Name(), retries)
-
-			select {
-			case <-handler.stopChan:
-				// Start has been cancelled
-				return
-			case <-time.After(10 * time.Second):
-				// Try again
-				continue
-			}
+	for {
+		if tryStartPlugin() {
+			manager.state.updateHandler(plugin.Name(), true)
+			return
 		}
-	}()
-	manager.handlers[plugin.Name()] = handler
+
+		retries++
+		if retries > 10 {
+			manager.state.updateHandler(plugin.Name(), false)
+			log.DefaultLogger().Errorf("Unable to start %s USB pluggin", plugin.Name())
+			return
+		}
+		select {
+		case <-stop:
+			// Start has been cancelled
+			return
+		case <-time.After(10 * time.Second):
+			// Try again
+			continue
+		}
+	}
 }
 
 func parseSysUeventFile(path string) *usbDevice {

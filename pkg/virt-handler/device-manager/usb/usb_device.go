@@ -19,6 +19,15 @@ import (
 	devicepluginapi "kubevirt.io/kubevirt/pkg/virt-handler/device-manager/deviceplugin/v1beta1"
 )
 
+var _ Plugin = &usbDevicePlugin{}
+
+type Plugin interface {
+	Start(stop <-chan struct{}) (err error)
+	Name() string
+}
+
+type factory func(resourceName string, usbdevs []*usbDevice) Plugin
+
 // The sysfs metadata wrapper for the USB devices
 type usbDevice struct {
 	Name         string
@@ -40,6 +49,8 @@ func (dev *usbDevice) GetID() string {
 type usbDevicePlugin struct {
 	socketPath   string
 	stop         <-chan struct{}
+	done         chan struct{}
+	deregistered chan struct{}
 	server       *grpc.Server
 	resourceName string
 	devices      []*usbDevice
@@ -51,8 +62,32 @@ func (plugin *usbDevicePlugin) Name() string {
 	return plugin.resourceName
 }
 
+func (plugin *usbDevicePlugin) stopDevicePlugin() error {
+	defer func() {
+		select {
+		case <-plugin.done:
+			return
+		default:
+			close(plugin.done)
+		}
+	}()
+
+	// Give the device plugin one second to properly deregister
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	select {
+	case <-plugin.deregistered:
+	case <-ticker.C:
+	}
+
+	plugin.server.Stop()
+	return plugin.cleanup()
+}
+
 func (plugin *usbDevicePlugin) Start(stop <-chan struct{}) error {
 	plugin.stop = stop
+	plugin.done = make(chan struct{})
+	plugin.deregistered = make(chan struct{})
 
 	err := plugin.cleanup()
 	if err != nil {
@@ -65,6 +100,7 @@ func (plugin *usbDevicePlugin) Start(stop <-chan struct{}) error {
 	}
 
 	plugin.server = grpc.NewServer([]grpc.ServerOption{}...)
+	defer plugin.stopDevicePlugin()
 
 	devicepluginapi.RegisterDevicePluginServer(plugin.server, plugin)
 
@@ -147,12 +183,12 @@ func (plugin *usbDevicePlugin) ListAndWatch(_ *devicepluginapi.Empty, lws device
 		return err
 	}
 
-loop:
-	for {
+	done := false
+	for !done {
 		select {
 		// TODO add a health check, e.g usb was unplugged
 		case <-plugin.stop:
-			break loop
+			done = true
 		}
 	}
 
@@ -163,6 +199,7 @@ loop:
 		log.Log.Reason(err).Warningf("Failed to deregister device plugin %s",
 			plugin.resourceName)
 	}
+	close(plugin.deregistered)
 	return nil
 }
 
@@ -224,11 +261,6 @@ func (plugin *usbDevicePlugin) Allocate(_ context.Context, allocRequest *devicep
 
 func (plugin *usbDevicePlugin) PreStartContainer(context.Context, *devicepluginapi.PreStartContainerRequest) (*devicepluginapi.PreStartContainerResponse, error) {
 	return &devicepluginapi.PreStartContainerResponse{}, nil
-}
-
-type Plugin interface {
-	Start(stop <-chan struct{}) (err error)
-	Name() string
 }
 
 func NewUSBDevicePlugin(resourceName string, usbdevs []*usbDevice) Plugin {
