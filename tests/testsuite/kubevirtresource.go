@@ -90,6 +90,11 @@ func AdjustKubeVirtResource() {
 			},
 		},
 	}
+
+	kv.Spec.Configuration.DeveloperConfiguration.LogVerbosity = &v1.LogVerbosity{
+		VirtHandler: 9,
+	}
+
 	kv.Spec.Configuration.DeveloperConfiguration.FeatureGates = append(kv.Spec.Configuration.DeveloperConfiguration.FeatureGates,
 		virtconfig.CPUManager,
 		virtconfig.IgnitionGate,
