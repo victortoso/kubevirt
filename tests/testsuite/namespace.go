@@ -246,6 +246,10 @@ func CleanNamespaces() {
 			util.PanicOnError(virtCli.MigrationPolicy().Delete(context.Background(), policy.Name, metav1.DeleteOptions{}))
 		}
 
+		util.PanicOnError(virtCli.GeneratedKubeVirtClient().UsbV1alpha1().
+			USBDevicesConfigs(namespace).
+			DeleteCollection(context.TODO(), metav1.DeleteOptions{}, metav1.ListOptions{}))
+
 		// Remove clones
 		clonesList, err := virtCli.VirtualMachineClone(namespace).List(context.Background(), metav1.ListOptions{})
 		util.PanicOnError(err)
