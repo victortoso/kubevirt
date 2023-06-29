@@ -245,7 +245,13 @@ func CleanNamespaces() {
 		for _, policy := range migrationPolicyList.Items {
 			util.PanicOnError(virtCli.MigrationPolicy().Delete(context.Background(), policy.Name, metav1.DeleteOptions{}))
 		}
-
+		// nodeConfigsList, err := virtCli.GeneratedKubeVirtClient().UsbV1alpha1().NodeConfigs().List(context.TODO(), listOptions)
+		// util.PanicOnError(err)
+		// for _, nodeConfig := range nodeConfigsList.Items {
+		util.PanicOnError(virtCli.GeneratedKubeVirtClient().UsbV1alpha1().
+			NodeConfigs().
+			DeleteCollection(context.TODO(), metav1.DeleteOptions{}, metav1.ListOptions{}))
+		// }
 		// Remove clones
 		clonesList, err := virtCli.VirtualMachineClone(namespace).List(context.Background(), metav1.ListOptions{})
 		util.PanicOnError(err)
