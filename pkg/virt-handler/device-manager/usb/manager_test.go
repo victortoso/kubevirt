@@ -108,6 +108,118 @@ var _ = Describe("USB Manager", func() {
 				return manager.state.resourceNameToPluginHandler[resourceName].started
 			}, 2*time.Second).Should(BeTrue(), "Plugin should be started")
 		})
+
+		It("should stop plugin", func() {
+			manager.Execute()
+
+			// Wait start
+			Eventually(func() bool {
+				return manager.state.resourceNameToPluginHandler[resourceName].started
+			}, 2*time.Second).Should(BeTrue(), "Plugin should be started")
+
+			feeder.Delete(usbDevicesConfig)
+			manager.Execute()
+
+			// Wait stop
+			Eventually(func() map[string]*pluginHandler {
+				return manager.state.resourceNameToPluginHandler
+			}, 2*time.Second).Should(BeEmpty(), "No plugin is running")
+		})
+
+		It("should fail due usb devices found in the node", func() {
+			manager.discoveryFunc = func() []*usbDevice { return discoveryHelper([]string{}) }
+			manager.Execute()
+			Expect(manager.state.resourceNameToPluginHandler).To(BeEmpty(), "Should be empty as no usb  was found")
+		})
+
+		It("should find the usb device and handle it", func() {
+			manager.Execute()
+
+			// Check if resource was added
+			Expect(manager.state.resourceNameToPluginHandler).To(HaveKey(resourceName))
+			usbPlugin := manager.state.resourceNameToPluginHandler[resourceName].plugin.(*stub)
+			Expect(usbPlugin.devices).To(HaveLen(1))
+			Expect(usbPlugin.devices).Should(ContainElement(HaveField("Product", toInt("beef"))))
+
+		})
+
+		It("should change the usb device over same config name", func() {
+			manager.Execute()
+
+			usbDevicesConfig.Spec.USB.USBHostDevices = []v1alpha1.USBHostDevices{
+				{
+					SelectByVendorProduct: "dead:cafe",
+				},
+			}
+			feeder.Add(usbDevicesConfig)
+			manager.Execute()
+
+			Expect(manager.state.resourceNameToPluginHandler).To(HaveKey(resourceName))
+			usbPlugin := manager.state.resourceNameToPluginHandler[resourceName].plugin.(*stub)
+			Expect(usbPlugin.devices).To(HaveLen(1))
+			Expect(usbPlugin.devices).Should(ContainElement(HaveField("Product", toInt("cafe"))))
+		})
+	})
+
+	Context("multiple configs", func() {
+		var (
+			storageName    string
+			storageDevices []string
+			storageConfig  *v1alpha1.USBDevicesConfig
+
+			miscName    string
+			miscDevices []string
+			miscConfig  *v1alpha1.USBDevicesConfig
+		)
+
+		BeforeEach(func() {
+			// Using stub is not a must here as we don´t wait till the plugin start, in which case
+			// it would fail due lack of real sysfs. Still, better be safe instead of introducing
+			// possible flaky tests.
+			manager.factoryFunc = func(resourceName string, devices []*usbDevice) Plugin {
+				return &stub{
+					resourceName: resourceName,
+					devices:      devices,
+				}
+			}
+
+			storageName = "kubevirt.io/usb-storage"
+			storageDevices = []string{"dead:beef", "dead:cafe", "dead:face"}
+			storageConfig = usbDevicesConfigHelper(storageName, storageDevices)
+			feeder.Add(storageConfig)
+
+			miscName = "kubevirt.io/usb-misc"
+			miscDevices = []string{"dead:dead", "babe:cafe", "babe:face"}
+			miscConfig = usbDevicesConfigHelper(miscName, miscDevices)
+			feeder.Add(miscConfig)
+		})
+
+		It("should start plugin", func() {
+			devices := []string{}
+			devices = append(devices, storageDevices...)
+			devices = append(devices, miscDevices...)
+			manager.discoveryFunc = func() []*usbDevice { return discoveryHelper(devices) }
+
+			// Add the first resource and check
+			manager.Execute()
+			Expect(manager.state.resourceNameToPluginHandler).To(HaveLen(1))
+			Expect(manager.state.resourceNameToPluginHandler).To(HaveKey(storageName))
+
+			// Check usb devices from first resource
+			usbPlugin := manager.state.resourceNameToPluginHandler[storageName].plugin.(*stub)
+			Expect(usbPlugin.devices).To(HaveLen(3))
+			Expect(usbPlugin.devices).Should(ContainElement(HaveField("Product", toInt("beef"))))
+
+			// Add second resource and check
+			manager.Execute()
+			Expect(manager.state.resourceNameToPluginHandler).To(HaveLen(2))
+			Expect(manager.state.resourceNameToPluginHandler).To(HaveKey(miscName))
+
+			// Check usb devices from second resource
+			usbPlugin = manager.state.resourceNameToPluginHandler[miscName].plugin.(*stub)
+			Expect(usbPlugin.devices).To(HaveLen(3))
+			Expect(usbPlugin.devices).Should(ContainElement(HaveField("Product", toInt("dead"))))
+		})
 	})
 })
 
@@ -144,4 +256,9 @@ func usbDevicesConfigHelper(name string, devices []string) *v1alpha1.USBDevicesC
 			})
 	}
 	return config
+}
+
+func toInt(str string) int {
+	val, _ := strconv.ParseInt(str, 16, 32)
+	return int(val)
 }
