@@ -38,6 +38,7 @@ import (
 	hooksInfo "kubevirt.io/kubevirt/pkg/hooks/info"
 	hooksV1alpha1 "kubevirt.io/kubevirt/pkg/hooks/v1alpha1"
 	hooksV1alpha2 "kubevirt.io/kubevirt/pkg/hooks/v1alpha2"
+	hooksV1alpha3 "kubevirt.io/kubevirt/pkg/hooks/v1alpha3"
 	grpcutil "kubevirt.io/kubevirt/pkg/util/net/grpc"
 	virtwrapApi "kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
 )
@@ -60,6 +61,7 @@ type (
 		Collect(uint, time.Duration) error
 		OnDefineDomain(*virtwrapApi.DomainSpec, *v1.VirtualMachineInstance) (string, error)
 		PreCloudInitIso(*v1.VirtualMachineInstance, *cloudinit.CloudInitData) (*cloudinit.CloudInitData, error)
+		Shutdown() error
 	}
 	hookManager struct {
 		CallbacksPerHookPoint     map[string][]*callBackClient
@@ -159,7 +161,13 @@ func processSideCarSocket(socketPath string) (*callBackClient, bool, error) {
 		versionsSet[version] = true
 	}
 
-	if _, found := versionsSet[hooksV1alpha2.Version]; found {
+	if _, found := versionsSet[hooksV1alpha3.Version]; found {
+		return &callBackClient{
+			SocketPath:           socketPath,
+			Version:              hooksV1alpha3.Version,
+			subscribedHookPoints: info.GetHookPoints(),
+		}, false, nil
+	} else if _, found := versionsSet[hooksV1alpha2.Version]; found {
 		return &callBackClient{
 			SocketPath:           socketPath,
 			Version:              hooksV1alpha2.Version,
@@ -244,6 +252,17 @@ func (m *hookManager) onDefineDomainCallback(callback *callBackClient, domainSpe
 	case hooksV1alpha2.Version:
 		client := hooksV1alpha2.NewCallbacksClient(conn)
 		result, err := client.OnDefineDomain(ctx, &hooksV1alpha2.OnDefineDomainParams{
+			DomainXML: domainSpecXML,
+			Vmi:       vmiJSON,
+		})
+		if err != nil {
+			log.Log.Reason(err).Error("Failed to call OnDefineDomain")
+			return nil, err
+		}
+		domainSpecXML = result.GetDomainXML()
+	case hooksV1alpha3.Version:
+		client := hooksV1alpha3.NewCallbacksClient(conn)
+		result, err := client.OnDefineDomain(ctx, &hooksV1alpha3.OnDefineDomainParams{
 			DomainXML: domainSpecXML,
 			Vmi:       vmiJSON,
 		})
@@ -347,9 +366,66 @@ func (m *hookManager) PreCloudInitIso(vmi *v1.VirtualMachineInstance, cloudInitD
 				return cloudInitData, err
 			}
 			return preCloudInitIsoValidateResult(cloudInitData.DataSource, result.GetCloudInitData(), result.GetCloudInitNoCloudSource())
+		case hooksV1alpha3.Version:
+			json, err := preCloudInitIsoDataToJSON(vmi, cloudInitData)
+			if err != nil {
+				log.Log.Reason(err).Error("Failed to run PreCloudInitIso")
+				return cloudInitData, err
+			}
+
+			conn, err := grpcutil.DialSocketWithTimeout(callback.SocketPath, 1)
+			if err != nil {
+				log.Log.Reason(err).Errorf(dialSockErr, callback.SocketPath)
+				return cloudInitData, err
+			}
+			defer conn.Close()
+
+			client := hooksV1alpha3.NewCallbacksClient(conn)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cancel()
+
+			result, err := client.PreCloudInitIso(ctx, &hooksV1alpha3.PreCloudInitIsoParams{
+				CloudInitData:          json[0],
+				CloudInitNoCloudSource: json[1],
+				Vmi:                    json[2],
+			})
+			if err != nil {
+				log.Log.Reason(err).Error("Failed to call PreCloudInitIso")
+				return cloudInitData, err
+			}
+			return preCloudInitIsoValidateResult(cloudInitData.DataSource, result.GetCloudInitData(), result.GetCloudInitNoCloudSource())
 		default:
 			log.Log.Errorf("Unsupported callback version: %s", callback.Version)
 		}
 	}
 	return cloudInitData, nil
+}
+
+func (m *hookManager) Shutdown() error {
+	callbacks, found := m.CallbacksPerHookPoint[hooksInfo.ShutdownHookPointName]
+	if !found {
+		return nil
+	}
+	for _, callback := range callbacks {
+		switch callback.Version {
+		case hooksV1alpha3.Version:
+			conn, err := grpcutil.DialSocketWithTimeout(callback.SocketPath, 1)
+			if err != nil {
+				log.Log.Reason(err).Error("Failed to run Shutdown")
+				return err
+			}
+			client := hooksV1alpha3.NewCallbacksClient(conn)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cancel()
+
+			_, err = client.Shutdown(ctx, &hooksV1alpha3.ShutdownParams{})
+			if err != nil {
+				log.Log.Reason(err).Error("Failed to run Shutdown")
+				return err
+			}
+		default:
+			log.Log.Errorf("Unsupported callback version: %s", callback.Version)
+		}
+	}
+	return nil
 }
