@@ -25,76 +25,50 @@ type USBManagerInterface interface {
 // The handler to store and access Plugin's states
 type state struct {
 	// FIXME: Should the resourceName be unique across USBDevicesConfigs?
-	resourceNameToPluginHandler map[string]*pluginHandler
-	usbDevicesConfigToResource  map[string]string
-	lock                        sync.Mutex
-	logger                      *log.FilteredLogger
+	plugins map[string]*pluginHandler
+	lock    sync.Mutex
+	logger  *log.FilteredLogger
 }
 
 func newState() state {
 	return state{
-		resourceNameToPluginHandler: map[string]*pluginHandler{},
-		usbDevicesConfigToResource:  map[string]string{},
-		lock:                        sync.Mutex{},
-		logger:                      log.Log.With("subcomponent", "usb-manager-state"),
+		plugins: map[string]*pluginHandler{},
+		lock:    sync.Mutex{},
+		logger:  log.Log.With("subcomponent", "usb-manager-state"),
 	}
 }
 
-func (s *state) insert(key string, plugin Plugin) chan struct{} {
+func (s *state) insert(plugin Plugin) chan struct{} {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	if _, alreadyExists := s.usbDevicesConfigToResource[key]; alreadyExists {
-		s.logger.Warningf("Could not insert %s: Already exists", key)
-		return nil
-	}
 	close := make(chan struct{})
 	resourceName := plugin.Name()
-
-	s.usbDevicesConfigToResource[key] = resourceName
-	s.resourceNameToPluginHandler[resourceName] = &pluginHandler{
+	s.plugins[resourceName] = &pluginHandler{
 		started:  false,
 		failed:   false,
 		stopChan: close,
 		plugin:   plugin,
 	}
-	s.logger.V(5).Infof("Insert %s", key)
 	return close
 }
 
-func (s *state) clean(key string) {
+func (s *state) clean() {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	resourceName, configInState := s.usbDevicesConfigToResource[key]
-	if !configInState {
-		return
+	for resourceName, handler := range s.plugins {
+		close(handler.stopChan)
+		delete(s.plugins, resourceName)
+		s.logger.V(5).Infof("Removed %s", resourceName)
 	}
-
-	handler := s.resourceNameToPluginHandler[resourceName]
-	close(handler.stopChan)
-
-	delete(s.usbDevicesConfigToResource, key)
-	delete(s.resourceNameToPluginHandler, resourceName)
-	s.logger.V(5).Infof("Removed %s", key)
-}
-
-func (s *state) list() []string {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
-	ret := make([]string, len(s.usbDevicesConfigToResource))
-	for key := range s.usbDevicesConfigToResource {
-		ret = append(ret, key)
-	}
-	return ret
 }
 
 func (s *state) updateHandler(resourceName string, started bool) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	handler, exist := s.resourceNameToPluginHandler[resourceName]
+	handler, exist := s.plugins[resourceName]
 	if !exist {
 		s.logger.Warningf("Failed to update %s: resource no longer exists", resourceName)
 		return
@@ -133,7 +107,7 @@ type usbDeviceSelector struct {
 }
 
 func NewUSBManager(usbDevicesConfigInformer cache.SharedIndexInformer) *USBManager {
-	queue := workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "virt-handler-usbdevicesconfig")
+	queue := workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "virt-handler-usb-devices-config")
 	manager := &USBManager{
 		usbDevicesConfigInformer: usbDevicesConfigInformer,
 		queue:                    queue,
@@ -151,26 +125,6 @@ func NewUSBManager(usbDevicesConfigInformer cache.SharedIndexInformer) *USBManag
 	return manager
 }
 
-func (manager *USBManager) cleanUpWorker(stop chan struct{}) func() {
-	return func() {
-		t := time.NewTicker(5 * time.Second)
-		defer t.Stop()
-		for {
-			select {
-			case <-t.C:
-				for _, key := range manager.state.list() {
-					if _, exists, _ := manager.usbDevicesConfigInformer.GetIndexer().GetByKey(key); !exists {
-						manager.logger.Infof("Cleaning up plugin for %s node config", key)
-						manager.state.clean(key)
-					}
-				}
-			case <-stop:
-				return
-			}
-		}
-	}
-}
-
 func (manager *USBManager) Run(stopCh chan struct{}) {
 	defer manager.queue.ShutDown()
 
@@ -178,56 +132,48 @@ func (manager *USBManager) Run(stopCh chan struct{}) {
 
 	cache.WaitForCacheSync(stopCh, manager.usbDevicesConfigInformer.HasSynced)
 
-	// Start the actual work
+	//
 	go wait.Until(manager.runWorker, time.Second, stopCh)
-	// TODO: This might not be necessary as execute() should know when a USBDevicesConfig changed or was
-	// deleted.
-	go wait.Until(manager.cleanUpWorker(stopCh), time.Second, stopCh)
 	manager.logger.Info("Started USB manager")
 
 	<-stopCh
 	manager.logger.Info("Stoping USB manager")
 }
 
-func (manager *USBManager) Execute() bool {
+func (manager *USBManager) runWorker() {
 	key, quit := manager.queue.Get()
 	if quit {
-		return false
+		manager.logger.V(5).Info("Queue signals to exit")
+		return
 	}
 	defer manager.queue.Done(key)
 
-	if err := manager.execute(key.(string)); err != nil {
+	err := manager.execute(key.(string))
+	if err != nil {
 		manager.logger.Reason(err).Infof("re-enqueuing USBDevicesConfig %v", key)
 		manager.queue.AddRateLimited(key)
-	} else {
-		manager.logger.V(5).Infof("processed USBDevicesConfig %v", key)
-		manager.queue.Forget(key)
 	}
-	return true
-}
 
-func (manager *USBManager) runWorker() {
-	for manager.Execute() {
-	}
+	manager.logger.V(5).Infof("processed USBDevicesConfig %v", key)
+	manager.queue.Forget(key)
 }
 
 func (manager *USBManager) execute(key string) error {
 	obj, exists, err := manager.usbDevicesConfigInformer.GetStore().GetByKey(key)
+
 	if err != nil {
 		return fmt.Errorf("failed to get object for key %s, %v", key, err)
-	}
-
-	if !exists || obj == nil {
-		manager.state.clean(key)
+	} else if !exists || obj == nil {
+		manager.logger.V(5).Infof("processed USBDevicesConfig %v", key)
+		manager.state.clean()
 		return nil
 	}
 
 	// If key already exists, cleanup before proceeding
-	manager.state.clean(key)
+	manager.state.clean()
 
-	manager.logger.V(5).Infof("Iterating over %s", key)
 	usbDevicesConfig := obj.(*v1alpha1.USBDevicesConfig)
-	return manager.syncDevicePlugin(usbDevicesConfig, key)
+	return manager.syncDevicePlugin(usbDevicesConfig)
 }
 
 func constructPermittedUSBDevicesMap(usbDevicesConfig *v1alpha1.USBDevicesConfig) map[int][]usbDeviceSelector {
@@ -258,7 +204,7 @@ func constructPermittedUSBDevicesMap(usbDevicesConfig *v1alpha1.USBDevicesConfig
 			}
 			product := int(val)
 
-			// TODO: For the moment, we consider only a single resource can hold a product:vendor.
+			// TODO: For the moment, we consider that only a single resource can hold a product:vendor.
 			// we will need more selectors to allow multiple resources to hold same product:vendor
 			if selectors, exists := permittedUSBDevices[vendor]; exists {
 				otherProductResourceName := ""
@@ -287,7 +233,7 @@ func constructPermittedUSBDevicesMap(usbDevicesConfig *v1alpha1.USBDevicesConfig
 	return permittedUSBDevices
 }
 
-func (manager *USBManager) syncDevicePlugin(usbDevicesConfig *v1alpha1.USBDevicesConfig, key string) error {
+func (manager *USBManager) syncDevicePlugin(usbDevicesConfig *v1alpha1.USBDevicesConfig) error {
 	manager.logger.V(5).Infof("%s sync", usbDevicesConfig.Name)
 
 	// Sanity check
@@ -330,14 +276,14 @@ func (manager *USBManager) syncDevicePlugin(usbDevicesConfig *v1alpha1.USBDevice
 	for resourceName, devices := range devicesToExport {
 		manager.logger.V(5).Infof("%s has %d devices", resourceName, len(devices))
 		plugin := manager.factoryFunc(resourceName, devices)
-		manager.startPlugin(plugin, key)
+		manager.startPlugin(plugin)
 	}
 	return nil
 }
 
-func (manager *USBManager) startPlugin(plugin Plugin, key string) {
+func (manager *USBManager) startPlugin(plugin Plugin) {
 	var stop chan struct{}
-	if stop = manager.state.insert(key, plugin); stop == nil {
+	if stop = manager.state.insert(plugin); stop == nil {
 		// No changes in USBDevicesConfig
 		manager.logger.V(5).Infof("USB plugin %s is already started", plugin.Name())
 		return
