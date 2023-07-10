@@ -205,8 +205,10 @@ func (plugin *usbDevicePlugin) ListAndWatch(_ *devicepluginapi.Empty, lws device
 
 // Interface to allocate requested Device, exported by ListAndWatch
 func (plugin *usbDevicePlugin) Allocate(_ context.Context, allocRequest *devicepluginapi.AllocateRequest) (*devicepluginapi.AllocateResponse, error) {
-	response := new(devicepluginapi.AllocateResponse)
+	allocResponse := new(devicepluginapi.AllocateResponse)
+	env := make(map[string]string)
 	for _, request := range allocRequest.ContainerRequests {
+		containerResponse := &devicepluginapi.ContainerAllocateResponse{}
 		for _, id := range request.DevicesIDs {
 			plugin.logger.V(5).Infof("usb device id: %s", id)
 
@@ -233,24 +235,26 @@ func (plugin *usbDevicePlugin) Allocate(_ context.Context, allocRequest *devicep
 				return nil, fmt.Errorf("error setting the permission the socket %s: %v", dev.DevicePath, err)
 			}
 
-			containerResponse := &devicepluginapi.ContainerAllocateResponse{
-				Envs: map[string]string{
-					util.ResourceNameToEnvVar("USB", plugin.resourceName): fmt.Sprintf("%d:%d", dev.Bus, dev.DeviceNumber),
-				},
-				Devices: []*devicepluginapi.DeviceSpec{
-					{
-						ContainerPath: dev.DevicePath,
-						HostPath:      dev.DevicePath,
-						Permissions:   "mrw",
-					},
-				},
-				Annotations: nil,
+			// We might have more than one USB device per resource name
+			key := util.ResourceNameToEnvVar("USB", plugin.resourceName)
+			value := fmt.Sprintf("%d:%d", dev.Bus, dev.DeviceNumber)
+			if previous, exist := env[key]; exist {
+				env[key] = fmt.Sprintf("%s,%s", previous, value)
+			} else {
+				env[key] = value
 			}
-			response.ContainerResponses = append(response.ContainerResponses, containerResponse)
+			containerResponse.Envs = env
+			containerResponse.Devices = append(containerResponse.Devices,
+				&devicepluginapi.DeviceSpec{
+					ContainerPath: dev.DevicePath,
+					HostPath:      dev.DevicePath,
+					Permissions:   "mrw",
+				})
 		}
+		allocResponse.ContainerResponses = append(allocResponse.ContainerResponses, containerResponse)
 	}
 
-	return response, nil
+	return allocResponse, nil
 }
 
 func (plugin *usbDevicePlugin) PreStartContainer(context.Context, *devicepluginapi.PreStartContainerRequest) (*devicepluginapi.PreStartContainerResponse, error) {
