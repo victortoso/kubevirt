@@ -348,44 +348,51 @@ func parseSysUeventFile(path string) *usbDevice {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
-		equal := strings.Index(line, "=")
-		if strings.HasPrefix(line, "BUSNUM") {
-			val, err := strconv.ParseInt(line[equal+1:], 10, 32)
+		values := strings.Split(line, "=")
+		if len(values) != 2 {
+			log.Log.Infof("Skipping %s due not being key=value", line)
+			continue
+		}
+		switch values[0] {
+		case "BUSNUM":
+			val, err := strconv.ParseInt(values[1], 10, 32)
 			if err != nil {
 				return nil
 			}
 			u.Bus = int(val)
-		} else if strings.HasPrefix(line, "DEVNUM") {
-			val, err := strconv.ParseInt(line[equal+1:], 10, 32)
+		case "DEVNUM":
+			val, err := strconv.ParseInt(values[1], 10, 32)
 			if err != nil {
 				return nil
 			}
 			u.DeviceNumber = int(val)
-		} else if strings.HasPrefix(line, "PRODUCT") {
-			values := strings.Split(line[equal+1:], "/")
-			if len(values) != 3 {
+		case "PRODUCT":
+			products := strings.Split(values[1], "/")
+			if len(products) != 3 {
 				return nil
 			}
 
-			val, err := strconv.ParseInt(values[0], 16, 32)
+			val, err := strconv.ParseInt(products[0], 16, 32)
 			if err != nil {
 				return nil
 			}
 			u.Vendor = int(val)
 
-			val, err = strconv.ParseInt(values[1], 16, 32)
+			val, err = strconv.ParseInt(products[1], 16, 32)
 			if err != nil {
 				return nil
 			}
 			u.Product = int(val)
 
-			val, err = strconv.ParseInt(values[2], 16, 32)
+			val, err = strconv.ParseInt(products[2], 16, 32)
 			if err != nil {
 				return nil
 			}
 			u.BCD = int(val)
-		} else if strings.HasPrefix(line, "DEVNAME") {
-			u.DevicePath = "/dev/" + line[equal+1:]
+		case "DEVNAME":
+			u.DevicePath = "/dev/" + values[1]
+		default:
+			log.Log.V(5).Infof("Skipping unhandled line: %s", line)
 		}
 	}
 	return &u
