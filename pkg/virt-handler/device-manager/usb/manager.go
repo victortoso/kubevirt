@@ -42,15 +42,19 @@ func (s *state) insert(plugin Plugin) chan struct{} {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	close := make(chan struct{})
 	resourceName := plugin.Name()
+	if _, exists := s.plugins[resourceName]; exists {
+		return nil
+	}
+
+	stopChan := make(chan struct{})
 	s.plugins[resourceName] = &pluginHandler{
 		started:  false,
 		failed:   false,
-		stopChan: close,
+		stopChan: stopChan,
 		plugin:   plugin,
 	}
-	return close
+	return stopChan
 }
 
 func (s *state) clean() {
@@ -131,15 +135,14 @@ func (manager *USBManager) Run(stopCh chan struct{}) {
 
 	cache.WaitForCacheSync(stopCh, manager.usbDevicesConfigInformer.HasSynced)
 
-	//
-	go wait.Until(manager.runWorker, time.Second, stopCh)
+	go wait.Until(manager.Execute, time.Second, stopCh)
 	manager.logger.Info("Started USB manager")
 
 	<-stopCh
 	manager.logger.Info("Stoping USB manager")
 }
 
-func (manager *USBManager) runWorker() {
+func (manager *USBManager) Execute() {
 	key, quit := manager.queue.Get()
 	if quit {
 		manager.logger.V(5).Info("Queue signals to exit")
@@ -190,7 +193,7 @@ func constructPermittedUSBDevicesMap(usbDevicesConfig *v1alpha1.USBDevicesConfig
 			val, err := strconv.ParseInt(values[0], 16, 32)
 			if err != nil {
 				log.Log.Warningf("Failed to convert vendor from base16 string to int: %s",
-					dev.SelectByVendorProduct[:sep])
+					values[0])
 				continue
 			}
 			vendor := int(val)
@@ -198,7 +201,7 @@ func constructPermittedUSBDevicesMap(usbDevicesConfig *v1alpha1.USBDevicesConfig
 			val, err = strconv.ParseInt(values[1], 16, 32)
 			if err != nil {
 				log.Log.Warningf("Failed to convert product from base16 string to int: %s",
-					dev.SelectByVendorProduct[:sep])
+					values[1])
 				continue
 			}
 			product := int(val)
@@ -271,6 +274,8 @@ func (manager *USBManager) syncDevicePlugin(usbDevicesConfig *v1alpha1.USBDevice
 			devicesToExport[resourceName] = append(devicesToExport[resourceName], device)
 		}
 	}
+	manager.logger.V(5).Infof("permitted devices: %+v, to export: %+v",
+		permittedDevicesPerVendor, devicesToExport)
 
 	for resourceName, devices := range devicesToExport {
 		manager.logger.V(5).Infof("%s has %d devices", resourceName, len(devices))
