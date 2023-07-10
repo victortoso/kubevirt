@@ -1,7 +1,6 @@
 package usb
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -86,7 +85,7 @@ var _ = Describe("USB Manager", func() {
 			resourceName = "kubevirt.io/usb-storage"
 			nodeDevices = []string{"dead:beef"}
 			localDevices = append(nodeDevices, "dead:cafe")
-			usbDevicesConfig = USBDevicesConfigHelper(resourceName, nodeDevices)
+			usbDevicesConfig = usbDevicesConfigHelper(nil, resourceName, nodeDevices)
 
 			manager.factoryFunc = func(resourceName string, devices []*usbDevice) Plugin {
 				return &stub{
@@ -106,7 +105,10 @@ var _ = Describe("USB Manager", func() {
 			Eventually(func() bool {
 				manager.state.lock.Lock()
 				defer manager.state.lock.Unlock()
-				return manager.state.resourceNameToPluginHandler[resourceName].started
+				if plugin, exist := manager.state.plugins[resourceName]; exist {
+					return plugin.started
+				}
+				return false
 			}, 2*time.Second).Should(BeTrue(), "Plugin should be started")
 		})
 
@@ -115,7 +117,10 @@ var _ = Describe("USB Manager", func() {
 
 			// Wait start
 			Eventually(func() bool {
-				return manager.state.resourceNameToPluginHandler[resourceName].started
+				if plugin, exist := manager.state.plugins[resourceName]; exist {
+					return plugin.started
+				}
+				return false
 			}, 2*time.Second).Should(BeTrue(), "Plugin should be started")
 
 			feeder.Delete(usbDevicesConfig)
@@ -123,22 +128,22 @@ var _ = Describe("USB Manager", func() {
 
 			// Wait stop
 			Eventually(func() map[string]*pluginHandler {
-				return manager.state.resourceNameToPluginHandler
+				return manager.state.plugins
 			}, 2*time.Second).Should(BeEmpty(), "No plugin is running")
 		})
 
 		It("should fail due usb devices found in the node", func() {
 			manager.discoveryFunc = func() []*usbDevice { return discoveryHelper([]string{}) }
 			manager.Execute()
-			Expect(manager.state.resourceNameToPluginHandler).To(BeEmpty(), "Should be empty as no usb  was found")
+			Expect(manager.state.plugins).To(BeEmpty(), "Should be empty as no usb  was found")
 		})
 
 		It("should find the usb device and handle it", func() {
 			manager.Execute()
 
 			// Check if resource was added
-			Expect(manager.state.resourceNameToPluginHandler).To(HaveKey(resourceName))
-			usbPlugin := manager.state.resourceNameToPluginHandler[resourceName].plugin.(*stub)
+			Expect(manager.state.plugins).To(HaveKey(resourceName))
+			usbPlugin := manager.state.plugins[resourceName].plugin.(*stub)
 			Expect(usbPlugin.devices).To(HaveLen(1))
 			Expect(usbPlugin.devices).Should(ContainElement(HaveField("Product", toInt("beef"))))
 
@@ -147,7 +152,7 @@ var _ = Describe("USB Manager", func() {
 		It("should change the usb device over same config name", func() {
 			manager.Execute()
 
-			usbDevicesConfig.Spec.USB.USBHostDevices = []v1alpha1.USBHostDevices{
+			usbDevicesConfig.Spec.USB[0].USBHostDevices = []v1alpha1.USBHostDevices{
 				{
 					SelectByVendorProduct: "dead:cafe",
 				},
@@ -155,8 +160,8 @@ var _ = Describe("USB Manager", func() {
 			feeder.Add(usbDevicesConfig)
 			manager.Execute()
 
-			Expect(manager.state.resourceNameToPluginHandler).To(HaveKey(resourceName))
-			usbPlugin := manager.state.resourceNameToPluginHandler[resourceName].plugin.(*stub)
+			Expect(manager.state.plugins).To(HaveKey(resourceName))
+			usbPlugin := manager.state.plugins[resourceName].plugin.(*stub)
 			Expect(usbPlugin.devices).To(HaveLen(1))
 			Expect(usbPlugin.devices).Should(ContainElement(HaveField("Product", toInt("cafe"))))
 		})
@@ -164,13 +169,13 @@ var _ = Describe("USB Manager", func() {
 
 	Context("multiple configs", func() {
 		var (
+			usbDevicesConfig *v1alpha1.USBDevicesConfig
+
 			storageName    string
 			storageDevices []string
-			storageConfig  *v1alpha1.USBDevicesConfig
 
 			miscName    string
 			miscDevices []string
-			miscConfig  *v1alpha1.USBDevicesConfig
 		)
 
 		BeforeEach(func() {
@@ -186,13 +191,11 @@ var _ = Describe("USB Manager", func() {
 
 			storageName = "kubevirt.io/usb-storage"
 			storageDevices = []string{"dead:beef", "dead:cafe", "dead:face"}
-			storageConfig = usbDevicesConfigHelper(storageName, storageDevices)
-			feeder.Add(storageConfig)
+			usbDevicesConfig = usbDevicesConfigHelper(nil, storageName, storageDevices)
+			feeder.Add(usbDevicesConfig)
 
 			miscName = "kubevirt.io/usb-misc"
 			miscDevices = []string{"dead:dead", "babe:cafe", "babe:face"}
-			miscConfig = usbDevicesConfigHelper(miscName, miscDevices)
-			feeder.Add(miscConfig)
 		})
 
 		It("should start plugin", func() {
@@ -203,21 +206,24 @@ var _ = Describe("USB Manager", func() {
 
 			// Add the first resource and check
 			manager.Execute()
-			Expect(manager.state.resourceNameToPluginHandler).To(HaveLen(1))
-			Expect(manager.state.resourceNameToPluginHandler).To(HaveKey(storageName))
+			Expect(manager.state.plugins).To(HaveLen(1))
+			Expect(manager.state.plugins).To(HaveKey(storageName))
 
 			// Check usb devices from first resource
-			usbPlugin := manager.state.resourceNameToPluginHandler[storageName].plugin.(*stub)
+			usbPlugin := manager.state.plugins[storageName].plugin.(*stub)
 			Expect(usbPlugin.devices).To(HaveLen(3))
 			Expect(usbPlugin.devices).Should(ContainElement(HaveField("Product", toInt("beef"))))
 
 			// Add second resource and check
+			usbDevicesConfig = usbDevicesConfigHelper(usbDevicesConfig, miscName, miscDevices)
+			feeder.Add(usbDevicesConfig)
 			manager.Execute()
-			Expect(manager.state.resourceNameToPluginHandler).To(HaveLen(2))
-			Expect(manager.state.resourceNameToPluginHandler).To(HaveKey(miscName))
+
+			Expect(manager.state.plugins).To(HaveLen(2))
+			Expect(manager.state.plugins).To(HaveKey(miscName))
 
 			// Check usb devices from second resource
-			usbPlugin = manager.state.resourceNameToPluginHandler[miscName].plugin.(*stub)
+			usbPlugin = manager.state.plugins[miscName].plugin.(*stub)
 			Expect(usbPlugin.devices).To(HaveLen(3))
 			Expect(usbPlugin.devices).Should(ContainElement(HaveField("Product", toInt("dead"))))
 		})
@@ -238,24 +244,27 @@ func discoveryHelper(usbs []string) []*usbDevice {
 	return ret
 }
 
-func usbDevicesConfigHelper(name string, devices []string) *v1alpha1.USBDevicesConfig {
-	config := &v1alpha1.USBDevicesConfig{
-		ObjectMeta: v1.ObjectMeta{
-			Namespace: "test",
-			Name:      fmt.Sprintf("test-%s", name),
-		},
-		Spec: v1alpha1.USBDevicesConfigSpec{
-			USB: v1alpha1.USB{
-				ResourceName: name,
-			},
-		},
-	}
+func usbDevicesConfigHelper(config *v1alpha1.USBDevicesConfig, resourceName string, devices []string) *v1alpha1.USBDevicesConfig {
+	// For this resourceName
+	usbs := []v1alpha1.USBHostDevices{}
 	for _, str := range devices {
-		config.Spec.USB.USBHostDevices = append(config.Spec.USB.USBHostDevices,
-			v1alpha1.USBHostDevices{
-				SelectByVendorProduct: str,
-			})
+		usbs = append(usbs, v1alpha1.USBHostDevices{
+			SelectByVendorProduct: str,
+		})
 	}
+
+	if config == nil {
+		config = &v1alpha1.USBDevicesConfig{
+			ObjectMeta: v1.ObjectMeta{
+				Namespace: "test",
+				Name:      "test-namespaced",
+			},
+		}
+	}
+	config.Spec.USB = append(config.Spec.USB, v1alpha1.USB{
+		ResourceName:   resourceName,
+		USBHostDevices: usbs,
+	})
 	return config
 }
 
