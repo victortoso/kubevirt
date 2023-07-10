@@ -74,9 +74,8 @@ func (s *state) updateHandler(resourceName string, started bool) {
 		return
 	}
 
-	if started {
-		handler.started = true
-	} else {
+	handler.started = started
+	if !started {
 		handler.failed = true
 	}
 	s.logger.V(5).Infof("%s update: started=%t failed=%t", resourceName, handler.started, handler.failed)
