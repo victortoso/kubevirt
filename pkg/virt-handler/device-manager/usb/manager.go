@@ -24,7 +24,7 @@ type USBManagerInterface interface {
 
 // The handler to store and access Plugin's states
 type state struct {
-	// FIXME: Should the resourceName be unique across USBDevicesConfigs?
+	// A handler per resource name
 	plugins map[string]*pluginHandler
 	lock    sync.Mutex
 	logger  *log.FilteredLogger
@@ -182,13 +182,13 @@ func constructPermittedUSBDevicesMap(usbDevicesConfig *v1alpha1.USBDevicesConfig
 	for _, usb := range usbDevicesConfig.Spec.USB {
 		resourceName := usb.ResourceName
 		for index, dev := range usb.USBHostDevices {
-			sep := strings.Index(dev.SelectByVendorProduct, ":")
-			if sep == -1 {
+			values := strings.Split(dev.SelectByVendorProduct, ":")
+			if len(values) != 2 {
 				log.Log.Warningf("Failed to parse USBHostDevices[%d] = %s",
 					index, dev.SelectByVendorProduct)
 				continue
 			}
-			val, err := strconv.ParseInt(dev.SelectByVendorProduct[:sep], 16, 32)
+			val, err := strconv.ParseInt(values[0], 16, 32)
 			if err != nil {
 				log.Log.Warningf("Failed to convert vendor from base16 string to int: %s",
 					dev.SelectByVendorProduct[:sep])
@@ -196,7 +196,7 @@ func constructPermittedUSBDevicesMap(usbDevicesConfig *v1alpha1.USBDevicesConfig
 			}
 			vendor := int(val)
 
-			val, err = strconv.ParseInt(dev.SelectByVendorProduct[sep+1:], 16, 32)
+			val, err = strconv.ParseInt(values[1], 16, 32)
 			if err != nil {
 				log.Log.Warningf("Failed to convert product from base16 string to int: %s",
 					dev.SelectByVendorProduct[:sep])
