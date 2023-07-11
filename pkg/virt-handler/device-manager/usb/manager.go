@@ -22,9 +22,16 @@ type USBManagerInterface interface {
 	Run(stopCh chan struct{})
 }
 
+// A Plugin per resource name
+type pluginHandler struct {
+	started  bool
+	failed   bool
+	stopChan chan struct{}
+	plugin   Plugin
+}
+
 // The handler to store and access Plugin's states
 type state struct {
-	// A handler per resource name
 	plugins map[string]*pluginHandler
 	lock    sync.Mutex
 	logger  *log.FilteredLogger
@@ -87,6 +94,13 @@ func (s *state) updateHandler(resourceName string, started bool) {
 
 type discoveryFuncType func() []*usbDevice
 
+// Selectos from the CRD
+type usbDeviceSelector struct {
+	resourceName string
+	vendor       int
+	product      int
+}
+
 type USBManager struct {
 	usbDevicesConfigInformer cache.SharedIndexInformer
 	queue                    workqueue.RateLimitingInterface
@@ -94,19 +108,7 @@ type USBManager struct {
 	factoryFunc              factoryFuncType
 	state                    state
 	logger                   *log.FilteredLogger
-}
-
-type pluginHandler struct {
-	started  bool
-	failed   bool
-	stopChan chan struct{}
-	plugin   Plugin
-}
-
-type usbDeviceSelector struct {
-	resourceName string
-	vendor       int
-	product      int
+	selectors                map[int][]*usbDeviceSelector
 }
 
 func NewUSBManager(usbDevicesConfigInformer cache.SharedIndexInformer) *USBManager {
@@ -171,7 +173,11 @@ func (manager *USBManager) execute(key string) error {
 		return nil
 	}
 
-	// If key already exists, cleanup before proceeding
+	// FIXME: We should instead update Plugins, it should:
+	// remove plugins if resource name does not exist anymore
+	// add plugins if new reosource name were added
+	// for existing plugins + resource name, do:
+	// - update usbs if selectors changed
 	manager.state.clean()
 
 	usbDevicesConfig := obj.(*v1alpha1.USBDevicesConfig)
@@ -192,13 +198,13 @@ func (manager *USBManager) syncDevicePlugin(usbDevicesConfig *v1alpha1.USBDevice
 		return nil
 	}
 
-	permittedDevicesPerVendor := constructPermittedUSBDevicesMap(usbDevicesConfig)
+	manager.selectors = constructPermittedUSBDevicesMap(usbDevicesConfig)
 
 	// For each device found in this node, compare with those requested in USBDevicesConfig
 	// to see if we have any matches as we only start the Plugin with those that matched.
 	devicesToExport := map[string][]*usbDevice{}
 	for _, localDevice := range localDevicesFound {
-		permittedDevices, vendorMatched := permittedDevicesPerVendor[localDevice.Vendor]
+		permittedDevices, vendorMatched := manager.selectors[localDevice.Vendor]
 		if !vendorMatched {
 			continue
 		}
@@ -215,7 +221,7 @@ func (manager *USBManager) syncDevicePlugin(usbDevicesConfig *v1alpha1.USBDevice
 		}
 	}
 	manager.logger.V(5).Infof("permitted devices: %+v, to export: %+v",
-		permittedDevicesPerVendor, devicesToExport)
+		manager.selectors, devicesToExport)
 
 	for resourceName, devices := range devicesToExport {
 		manager.logger.V(5).Infof("%s has %d devices", resourceName, len(devices))
@@ -225,9 +231,9 @@ func (manager *USBManager) syncDevicePlugin(usbDevicesConfig *v1alpha1.USBDevice
 	return nil
 }
 
-func constructPermittedUSBDevicesMap(usbDevicesConfig *v1alpha1.USBDevicesConfig) map[int][]usbDeviceSelector {
+func constructPermittedUSBDevicesMap(usbDevicesConfig *v1alpha1.USBDevicesConfig) map[int][]*usbDeviceSelector {
 	// Iterate over requested USB Devices and map it vendor:product
-	permittedUSBDevices := make(map[int][]usbDeviceSelector)
+	permittedUSBDevices := make(map[int][]*usbDeviceSelector)
 	for _, usb := range usbDevicesConfig.Spec.USB {
 		resourceName := usb.ResourceName
 		for index, dev := range usb.USBHostDevices {
@@ -272,7 +278,7 @@ func constructPermittedUSBDevicesMap(usbDevicesConfig *v1alpha1.USBDevicesConfig
 			}
 
 			permittedUSBDevices[vendor] = append(permittedUSBDevices[vendor],
-				usbDeviceSelector{
+				&usbDeviceSelector{
 					resourceName: resourceName,
 					vendor:       vendor,
 					product:      product,
