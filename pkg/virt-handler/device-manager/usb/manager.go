@@ -178,6 +178,53 @@ func (manager *USBManager) execute(key string) error {
 	return manager.syncDevicePlugin(usbDevicesConfig)
 }
 
+func (manager *USBManager) syncDevicePlugin(usbDevicesConfig *v1alpha1.USBDevicesConfig) error {
+	manager.logger.V(5).Infof("%s sync", usbDevicesConfig.Name)
+
+	// Sanity check
+	if usbDevicesConfig == nil || len(usbDevicesConfig.Spec.USB) == 0 {
+		return fmt.Errorf("No USB devices: %+v", usbDevicesConfig)
+	}
+
+	localDevicesFound := manager.discoveryFunc()
+	if len(localDevicesFound) == 0 {
+		manager.logger.V(5).Info("No USB devices found in this node")
+		return nil
+	}
+
+	permittedDevicesPerVendor := constructPermittedUSBDevicesMap(usbDevicesConfig)
+
+	// For each device found in this node, compare with those requested in USBDevicesConfig
+	// to see if we have any matches as we only start the Plugin with those that matched.
+	devicesToExport := map[string][]*usbDevice{}
+	for _, localDevice := range localDevicesFound {
+		permittedDevices, vendorMatched := permittedDevicesPerVendor[localDevice.Vendor]
+		if !vendorMatched {
+			continue
+		}
+		for _, configDevice := range permittedDevices {
+			if configDevice.product != localDevice.Product {
+				continue
+			}
+			resourceName := configDevice.resourceName
+
+			if _, ok := devicesToExport[resourceName]; !ok {
+				devicesToExport[resourceName] = []*usbDevice{}
+			}
+			devicesToExport[resourceName] = append(devicesToExport[resourceName], localDevice)
+		}
+	}
+	manager.logger.V(5).Infof("permitted devices: %+v, to export: %+v",
+		permittedDevicesPerVendor, devicesToExport)
+
+	for resourceName, devices := range devicesToExport {
+		manager.logger.V(5).Infof("%s has %d devices", resourceName, len(devices))
+		plugin := manager.factoryFunc(resourceName, devices)
+		manager.startPlugin(plugin)
+	}
+	return nil
+}
+
 func constructPermittedUSBDevicesMap(usbDevicesConfig *v1alpha1.USBDevicesConfig) map[int][]usbDeviceSelector {
 	// Iterate over requested USB Devices and map it vendor:product
 	permittedUSBDevices := make(map[int][]usbDeviceSelector)
@@ -235,73 +282,23 @@ func constructPermittedUSBDevicesMap(usbDevicesConfig *v1alpha1.USBDevicesConfig
 	return permittedUSBDevices
 }
 
-func (manager *USBManager) syncDevicePlugin(usbDevicesConfig *v1alpha1.USBDevicesConfig) error {
-	manager.logger.V(5).Infof("%s sync", usbDevicesConfig.Name)
-
-	// Sanity check
-	if usbDevicesConfig == nil || len(usbDevicesConfig.Spec.USB) == 0 {
-		manager.logger.V(5).Infof("No USB devices")
-		return nil
-	}
-
-	localDevicesFound := manager.discoveryFunc()
-	if len(localDevicesFound) == 0 {
-		manager.logger.V(5).Info("No USB devices found in this node")
-		return nil
-	}
-
-	permittedDevicesPerVendor := constructPermittedUSBDevicesMap(usbDevicesConfig)
-
-	// For each device found in this node, compare with those requested in USBDevicesConfig
-	// to see if we have any matches as we only start the Plugin with those that matched.
-	devicesToExport := map[string][]*usbDevice{}
-	for _, device := range localDevicesFound {
-		permittedDevices, vendorMatched := permittedDevicesPerVendor[device.Vendor]
-		if !vendorMatched {
-			continue
-		}
-		for _, permpermittedDevice := range permittedDevices {
-			if permpermittedDevice.product != device.Product {
-				continue
-			}
-
-			resourceName := permpermittedDevice.resourceName
-
-			_, ok := devicesToExport[resourceName]
-			if !ok {
-				devicesToExport[resourceName] = []*usbDevice{}
-			}
-			devicesToExport[resourceName] = append(devicesToExport[resourceName], device)
-		}
-	}
-	manager.logger.V(5).Infof("permitted devices: %+v, to export: %+v",
-		permittedDevicesPerVendor, devicesToExport)
-
-	for resourceName, devices := range devicesToExport {
-		manager.logger.V(5).Infof("%s has %d devices", resourceName, len(devices))
-		plugin := manager.factoryFunc(resourceName, devices)
-		manager.startPlugin(plugin)
-	}
-	return nil
-}
-
 func (manager *USBManager) startPlugin(plugin Plugin) {
-	var stop chan struct{}
-	if stop = manager.state.insert(plugin); stop == nil {
+	stop := manager.state.insert(plugin)
+	if stop == nil {
 		// No changes in USBDevicesConfig
 		manager.logger.V(5).Infof("USB plugin %s is already started", plugin.Name())
 		return
 	}
 
 	manager.logger.Infof("USB plugin %s starting", plugin.Name())
-	go manager.startUpPlugin(plugin, stop)
+	go manager.tryStartPlugin(plugin, stop)
 }
 
-func (manager *USBManager) startUpPlugin(plugin Plugin, stop chan struct{}) {
+func (manager *USBManager) tryStartPlugin(plugin Plugin, stopChan chan struct{}) {
 	retries := 0
 
-	tryStartPlugin := func() bool {
-		err := plugin.Start(stop)
+	tryFunc := func() bool {
+		err := plugin.Start(stopChan)
 		if err == nil {
 			manager.logger.Infof("Started %s USB plugin.", plugin.Name())
 			return true
@@ -313,7 +310,7 @@ func (manager *USBManager) startUpPlugin(plugin Plugin, stop chan struct{}) {
 	}
 
 	for {
-		if tryStartPlugin() {
+		if tryFunc() {
 			manager.state.updateHandler(plugin.Name(), true)
 			return
 		}
@@ -325,7 +322,7 @@ func (manager *USBManager) startUpPlugin(plugin Plugin, stop chan struct{}) {
 			return
 		}
 		select {
-		case <-stop:
+		case <-stopChan:
 			// Start has been cancelled
 			return
 		case <-time.After(10 * time.Second):
@@ -411,11 +408,10 @@ func discoverUSBDevices() []*usbDevice {
 			return nil
 		}
 
-		device := parseSysUeventFile(path)
-		if device == nil {
-			return nil
+		// Get device information
+		if device := parseSysUeventFile(path); device != nil {
+			usbDevices = append(usbDevices, device)
 		}
-		usbDevices = append(usbDevices, device)
 		return nil
 	})
 
