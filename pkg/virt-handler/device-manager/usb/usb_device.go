@@ -24,6 +24,8 @@ var _ Plugin = &usbDevicePlugin{}
 type Plugin interface {
 	Start(stop <-chan struct{}) (err error)
 	Name() string
+	UpdateDevice(param *usbDevice, isHealthy bool)
+	ListDevices() []*usbDevice
 }
 
 type factoryFuncType func(resourceName string, usbdevs []*usbDevice) Plugin
@@ -39,6 +41,7 @@ type usbDevice struct {
 	DeviceNumber int
 	Serial       string
 	DevicePath   string
+	isHealthy    bool
 }
 
 // The uniqueness in the system comes from bus and device number but having the vendor:product
@@ -59,6 +62,7 @@ func (dev *usbDevice) toKubeVirtDevicePlugin() *devicepluginapi.Device {
 type usbDevicePlugin struct {
 	socketPath   string
 	stop         <-chan struct{}
+	update       chan struct{}
 	done         chan struct{}
 	deregistered chan struct{}
 	server       *grpc.Server
@@ -79,6 +83,36 @@ var _ devicepluginapi.DevicePluginServer = &usbDevicePlugin{}
 
 func (plugin *usbDevicePlugin) Name() string {
 	return plugin.resourceName
+}
+
+func (plugin *usbDevicePlugin) GetDevice(id string) *usbDevice {
+	for _, usb := range plugin.devices {
+		if usb.GetID() == id {
+			return usb
+		}
+	}
+	return nil
+}
+
+func (plugin *usbDevicePlugin) ListDevices() []*usbDevice {
+	return plugin.devices
+}
+
+func (plugin *usbDevicePlugin) UpdateDevice(param *usbDevice, isHealthy bool) {
+	update := false
+	usb := plugin.GetDevice(param.GetID())
+	if usb != nil {
+		if usb.isHealthy == isHealthy {
+			usb.isHealthy = isHealthy
+			update = true
+		}
+	} else if isHealthy {
+		plugin.devices = append(plugin.devices, param)
+		update = true
+	}
+	if update {
+		plugin.update <- struct{}{}
+	}
 }
 
 func (plugin *usbDevicePlugin) stopDevicePlugin() error {

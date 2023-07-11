@@ -17,6 +17,10 @@ import (
 	"kubevirt.io/client-go/log"
 )
 
+const (
+	PathToUSBDevices = "/sys/bus/usb/devices"
+)
+
 // The public facing API for virt-handler
 type USBManagerInterface interface {
 	Run(stopCh chan struct{})
@@ -24,10 +28,11 @@ type USBManagerInterface interface {
 
 // A Plugin per resource name
 type pluginHandler struct {
-	started  bool
-	failed   bool
-	stopChan chan struct{}
-	plugin   Plugin
+	started    bool
+	failed     bool
+	stopChan   chan struct{}
+	updateChan chan struct{}
+	plugin     Plugin
 }
 
 // The handler to store and access Plugin's states
@@ -43,6 +48,20 @@ func newState() state {
 		lock:    sync.Mutex{},
 		logger:  log.Log.With("subcomponent", "usb-manager-state"),
 	}
+}
+
+func (s *state) setHealthy(resourceName string, param *usbDevice, isHealthy bool) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	handler, exists := s.plugins[resourceName]
+	if !exists {
+		// Because the selectors are set before the Plugins, we can recieve updates for resources
+		// that were not inserted. Unharmful race, just ignore.
+		return
+	}
+
+	handler.plugin.UpdateDevice(param, isHealthy)
 }
 
 func (s *state) insert(plugin Plugin) chan struct{} {
@@ -89,6 +108,7 @@ func (s *state) updateHandler(resourceName string, started bool) {
 	if !started {
 		handler.failed = true
 	}
+
 	s.logger.V(5).Infof("%s update: started=%t failed=%t", resourceName, handler.started, handler.failed)
 }
 
@@ -138,6 +158,7 @@ func (manager *USBManager) Run(stopCh chan struct{}) {
 	cache.WaitForCacheSync(stopCh, manager.usbDevicesConfigInformer.HasSynced)
 
 	go wait.Until(manager.Execute, time.Second, stopCh)
+	go wait.Until(manager.checkForUpdates, time.Minute, stopCh)
 	manager.logger.Info("Started USB manager")
 
 	<-stopCh
@@ -347,7 +368,9 @@ func parseSysUeventFile(path string) *usbDevice {
 	}
 	defer file.Close()
 
-	u := usbDevice{}
+	u := usbDevice{
+		isHealthy: true,
+	}
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -403,7 +426,7 @@ func parseSysUeventFile(path string) *usbDevice {
 
 func discoverUSBDevices() []*usbDevice {
 	usbDevices := make([]*usbDevice, 0)
-	err := filepath.Walk("/sys/bus/usb/devices", func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(PathToUSBDevices, func(path string, info os.FileInfo, err error) error {
 		// Ignore named usb controllers
 		if strings.HasPrefix(info.Name(), "usb") {
 			return nil
@@ -425,4 +448,40 @@ func discoverUSBDevices() []*usbDevice {
 		log.Log.Reason(err).Error("Failed when walking usb devices tree")
 	}
 	return usbDevices
+}
+
+func (manager *USBManager) checkForUpdates() {
+	// Bail if no config
+	if len(manager.selectors) == 0 {
+		return
+	}
+
+	// First check if new devices were added, any match with selectors are added
+	// to our visted cache variable and we let manager.state update the plugin
+	visited := make(map[string]*usbDevice)
+	localDevicesFound := manager.discoveryFunc()
+	for _, usb := range localDevicesFound {
+		selectors, exists := manager.selectors[usb.Vendor]
+		if !exists {
+			continue
+		}
+		for _, selector := range selectors {
+			if selector.product != usb.Product {
+				continue
+			}
+
+			visited[usb.GetID()] = usb
+			manager.state.setHealthy(selector.resourceName, usb, true)
+		}
+	}
+
+	// Now we check any device not in our cache and we set it unhealthy
+	for resourceName, handler := range manager.state.plugins {
+		for _, usb := range handler.plugin.ListDevices() {
+			if _, done := visited[usb.GetID()]; done {
+				continue
+			}
+			manager.state.setHealthy(resourceName, usb, false)
+		}
+	}
 }
