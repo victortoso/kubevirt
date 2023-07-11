@@ -47,6 +47,14 @@ func (dev *usbDevice) GetID() string {
 	return fmt.Sprintf("%04x:%04x-%02d:%02d", dev.Vendor, dev.Product, dev.Bus, dev.DeviceNumber)
 }
 
+func (dev *usbDevice) toKubeVirtDevicePlugin() *devicepluginapi.Device {
+	return &devicepluginapi.Device{
+		ID:       dev.GetID(),
+		Health:   devicepluginapi.Healthy,
+		Topology: nil,
+	}
+}
+
 // The actual plugin
 type usbDevicePlugin struct {
 	socketPath   string
@@ -57,6 +65,14 @@ type usbDevicePlugin struct {
 	resourceName string
 	devices      []*usbDevice
 	logger       *log.FilteredLogger
+}
+
+func (plugin *usbDevicePlugin) devicesToKubeVirtDevicePlugin() []*devicepluginapi.Device {
+	devices := make([]*devicepluginapi.Device, 0, len(plugin.devices))
+	for _, usb := range plugin.devices {
+		devices = append(devices, usb.toKubeVirtDevicePlugin())
+	}
+	return devices
 }
 
 var _ devicepluginapi.DevicePluginServer = &usbDevicePlugin{}
@@ -173,7 +189,7 @@ func (plugin *usbDevicePlugin) GetDevicePluginOptions(ctx context.Context, _ *de
 // Interface to expose Devices: IDs, health and Topology
 func (plugin *usbDevicePlugin) ListAndWatch(_ *devicepluginapi.Empty, lws devicepluginapi.DevicePlugin_ListAndWatchServer) error {
 	response := devicepluginapi.ListAndWatchResponse{
-		Devices: toDevicePluginDevice(plugin.devices),
+		Devices: plugin.devicesToKubeVirtDevicePlugin(),
 	}
 	if err := lws.Send(&response); err != nil {
 		plugin.logger.Reason(err).Warningf("Failed to send device plugin %s",
@@ -275,20 +291,4 @@ func NewUSBDevicePlugin(resourceName string, usbdevs []*usbDevice) Plugin {
 		logger:       log.Log.With("subcomponent", loggerID),
 	}
 	return plugin
-}
-
-func toDevice(usbdev *usbDevice) *devicepluginapi.Device {
-	return &devicepluginapi.Device{
-		ID:       usbdev.GetID(),
-		Health:   devicepluginapi.Healthy,
-		Topology: nil,
-	}
-}
-
-func toDevicePluginDevice(usbs []*usbDevice) []*devicepluginapi.Device {
-	devices := make([]*devicepluginapi.Device, 0, len(usbs))
-	for _, usb := range usbs {
-		devices = append(devices, toDevice(usb))
-	}
-	return devices
 }
