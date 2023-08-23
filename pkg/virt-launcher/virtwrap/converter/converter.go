@@ -1290,17 +1290,25 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 
 		if vmi.IsBootloaderEFI() {
 			secureBootRequested := vmi.IsSecureBootEnabled()
+			secureBootRequestedString := boolToYesNo(&secureBootRequested, false)
 
-			domain.Spec.OS.BootLoader = &api.Loader{
-				Path:     c.EFIConfiguration.EFICode,
-				ReadOnly: "yes",
-				Secure:   boolToYesNo(&secureBootRequested, false),
-				Type:     "pflash",
+			features := []api.OSFirmwareFeature{
+				{
+					Name:    "secure-boot",
+					Enabled: secureBootRequestedString,
+				},
+				{
+					// Note that enabling enrolled-keys firmware feature disables booting unsigned Guests.
+					Name:    "enrolled-keys",
+					Enabled: secureBootRequestedString,
+				},
 			}
 
-			domain.Spec.OS.NVRam = &api.NVRam{
-				Template: c.EFIConfiguration.EFIVars,
-				NVRam:    filepath.Join(services.PathForNVram(vmi), vmi.Name+"_VARS.fd"),
+			domain.Spec.OS = api.OS{
+				FirmwareType: api.OSFirmwareEFI,
+				FirmwareFeatures: api.OSFirmwareFeatures{
+					Features: features,
+				},
 			}
 		}
 
