@@ -128,12 +128,6 @@ func IsARM64VMI(vmi *v1.VirtualMachineInstance) bool {
 	return vmi.Spec.Architecture == "arm64"
 }
 
-func IsEFIVMI(vmi *v1.VirtualMachineInstance) bool {
-	return vmi.Spec.Domain.Firmware != nil &&
-		vmi.Spec.Domain.Firmware.Bootloader != nil &&
-		vmi.Spec.Domain.Firmware.Bootloader.EFI != nil
-}
-
 func IsVmiUsingHyperVReenlightenment(vmi *v1.VirtualMachineInstance) bool {
 	if vmi == nil {
 		return false
