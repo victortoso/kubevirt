@@ -507,7 +507,12 @@ func (l *LocalDevices) find(vendor, product int) *USBDevice {
 }
 
 // remove all cached elements
-func (l *LocalDevices) remove(cache map[string]*USBDevice) {
+func (l *LocalDevices) remove(usbdevs []*USBDevice) {
+	cache := make(map[string]bool)
+	for _, dev := range usbdevs {
+		cache[dev.GetID()] = true
+	}
+
 	devices := []*USBDevice{}
 	for _, local := range l.devices {
 		if _, exists := cache[local.GetID()]; !exists {
@@ -515,6 +520,31 @@ func (l *LocalDevices) remove(cache map[string]*USBDevice) {
 		}
 	}
 	l.devices = devices
+}
+
+// return a list of USBDevices while removing it from the list of local devices
+func (l *LocalDevices) fetch(selectors []v1.USBSelector) ([]*USBDevice, bool) {
+	usbdevs := []*USBDevice{}
+
+	// we have to find all devices under this resource name
+	for _, selector := range selectors {
+		vendor, product, err := parseSelector(&selector)
+		if err != nil {
+			log.Log.Reason(err).Warningf("Failed to convert selector: %+v", selector)
+			return nil, false
+		}
+
+		local := l.find(vendor, product)
+		if local == nil {
+			return nil, false
+		}
+
+		usbdevs = append(usbdevs, local)
+	}
+
+	// To avoid mapping the same usb device to different k8s plugins
+	l.remove(usbdevs)
+	return usbdevs, true
 }
 
 func discoverPluggedUSBDevices() *LocalDevices {
@@ -566,57 +596,12 @@ func discoverAllowedUSBDevices(usbs []v1.USBHostDevice) map[string][]*PluginDevi
 	localDevices := discoverLocalUSBDevicesFunc()
 	for _, usbConfig := range usbs {
 		resourceName := usbConfig.ResourceName
-		count := 0
-		// Tries the same resource name multiple times.
-		for true {
-			// we have to find all devices under this resource name
-			cache := make(map[string]*USBDevice)
-			for _, usbSelector := range usbConfig.Selectors {
-				vendor, product, err := parseSelector(&usbSelector)
-				if err != nil {
-					log.Log.Reason(err).Warningf("Failed to convert selector: %+v", usbSelector)
-					continue
-				}
-
-				local := localDevices.find(vendor, product)
-				if local == nil {
-					if count == 0 {
-						log.Log.V(2).Infof("Could not find device: %+v", usbSelector)
-					}
-					break
-				}
-
-				usbid := local.GetID()
-				if _, exists := cache[usbid]; exists {
-					// We don't support multiple equal USB devices under the same resource name
-					// Just move it to another resource name and add it to the VM more than once.
-					log.Log.V(2).Infof("Unsupported: In %s, the device %s:%s is duplicated",
-						usbConfig.ResourceName, usbSelector.Vendor, usbSelector.Product)
-					break
-				}
-
-				cache[usbid] = local
-			}
-
-			// We should find a device per selector to validate and permit this resource name
-			if len(cache) != len(usbConfig.Selectors) {
-				// Could not match this resource name in this iteration. Next!
-				break
-			}
-
-			// This avoids exposing the same USB device under different resource names. This is not
-			// supported. Just move it to another resource name to re-use it.
-			localDevices.remove(cache)
-
-			usbdevs := []*USBDevice{}
-			for _, usb := range cache {
-				usbdevs = append(usbdevs, usb)
-			}
-
+		index := 0
+		for usbdevs, foundAll := localDevices.fetch(usbConfig.Selectors); foundAll; {
 			// Create new USB Device Plugin with found USB Devices for this resource name
-			pluginDevices := newPluginDevices(resourceName, count, usbdevs)
+			pluginDevices := newPluginDevices(resourceName, index, usbdevs)
 			plugins[resourceName] = append(plugins[resourceName], pluginDevices)
-			count += 1
+			index++
 		}
 	}
 	return plugins
