@@ -65,7 +65,9 @@ func (s infoServer) Info(ctx context.Context, params *hooksInfo.InfoParams) (*ho
 
 	for hookPointName, binName := range supportedHookPoints {
 		if _, err := exec.LookPath(binName); err != nil {
-			log.Log.Infof("Info: %s has not been found", binName)
+			if errors.Is(err, exec.ErrNotFound) {
+				log.Log.Infof("Info: %s has not been found", binName)
+			}
 			continue
 		}
 
