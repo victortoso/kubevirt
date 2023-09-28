@@ -61,7 +61,7 @@ func (s infoServer) Info(ctx context.Context, params *hooksInfo.InfoParams) (*ho
 		hooksInfo.OnDefineDomainHookPointName:  onDefineDomainBin,
 		hooksInfo.PreCloudInitIsoHookPointName: preCloudInitIsoBin,
 	}
-	hookPoints := []*hooksInfo.HookPoint{}
+	var hookPoints = []*hooksInfo.HookPoint{}
 
 	for hookPointName, binName := range supportedHookPoints {
 		if _, err := exec.LookPath(binName); err != nil {
