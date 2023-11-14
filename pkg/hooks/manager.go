@@ -414,6 +414,8 @@ func (m *hookManager) Shutdown() error {
 				log.Log.Reason(err).Error("Failed to run Shutdown")
 				return err
 			}
+			defer conn.Close()
+
 			client := hooksV1alpha3.NewCallbacksClient(conn)
 			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 			defer cancel()
