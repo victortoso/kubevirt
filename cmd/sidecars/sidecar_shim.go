@@ -316,6 +316,6 @@ func main() {
 	}
 
 	if err == nil {
-		server.Stop()
+		server.GracefulStop()
 	}
 }
