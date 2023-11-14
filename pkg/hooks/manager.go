@@ -333,15 +333,16 @@ func (m *hookManager) PreCloudInitIso(vmi *v1.VirtualMachineInstance, cloudInitD
 	if !found {
 		return cloudInitData, nil
 	}
+
+	json, err := preCloudInitIsoDataToJSON(vmi, cloudInitData)
+	if err != nil {
+		log.Log.Reason(err).Error("Failed to run PreCloudInitIso")
+		return cloudInitData, err
+	}
+
 	for _, callback := range callbacks {
 		switch callback.Version {
 		case hooksV1alpha2.Version:
-			json, err := preCloudInitIsoDataToJSON(vmi, cloudInitData)
-			if err != nil {
-				log.Log.Reason(err).Error("Failed to run PreCloudInitIso")
-				return cloudInitData, err
-			}
-
 			conn, err := grpcutil.DialSocketWithTimeout(callback.SocketPath, 1)
 			if err != nil {
 				log.Log.Reason(err).Errorf(dialSockErr, callback.SocketPath)
@@ -364,12 +365,6 @@ func (m *hookManager) PreCloudInitIso(vmi *v1.VirtualMachineInstance, cloudInitD
 			}
 			return preCloudInitIsoValidateResult(cloudInitData.DataSource, result.GetCloudInitData(), result.GetCloudInitNoCloudSource())
 		case hooksV1alpha3.Version:
-			json, err := preCloudInitIsoDataToJSON(vmi, cloudInitData)
-			if err != nil {
-				log.Log.Reason(err).Error("Failed to run PreCloudInitIso")
-				return cloudInitData, err
-			}
-
 			conn, err := grpcutil.DialSocketWithTimeout(callback.SocketPath, 1)
 			if err != nil {
 				log.Log.Reason(err).Errorf(dialSockErr, callback.SocketPath)
