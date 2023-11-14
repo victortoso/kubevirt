@@ -161,29 +161,26 @@ func processSideCarSocket(socketPath string) (*callBackClient, bool, error) {
 		versionsSet[version] = true
 	}
 
-	if _, found := versionsSet[hooksV1alpha3.Version]; found {
-		return &callBackClient{
-			SocketPath:           socketPath,
-			Version:              hooksV1alpha3.Version,
-			subscribedHookPoints: info.GetHookPoints(),
-		}, false, nil
-	} else if _, found := versionsSet[hooksV1alpha2.Version]; found {
-		return &callBackClient{
-			SocketPath:           socketPath,
-			Version:              hooksV1alpha2.Version,
-			subscribedHookPoints: info.GetHookPoints(),
-		}, false, nil
-	} else if _, found := versionsSet[hooksV1alpha1.Version]; found {
-		return &callBackClient{
-			SocketPath:           socketPath,
-			Version:              hooksV1alpha1.Version,
-			subscribedHookPoints: info.GetHookPoints(),
-		}, false, nil
-	} else {
-		return nil, false,
-			fmt.Errorf("Hook sidecar does not expose a supported version. Exposed versions: %v, supported versions: %v",
-				info.GetVersions(), []string{hooksV1alpha1.Version, hooksV1alpha2.Version})
+	// The order matters. We should match newer versions first.
+	supportedVersions := []string{
+		hooksV1alpha3.Version
+		hooksV1alpha2.Version,
+		hooksV1alpha1.Version,
 	}
+
+	for _, version := range supportedVersions {
+		if _, found := versionsSet[version]; found {
+			return &callBackClient{
+				SocketPath:           socketPath,
+				Version:              version,
+				subscribedHookPoints: info.GetHookPoints(),
+			}, false, nil
+		}
+	}
+
+	return nil, false,
+		fmt.Errorf("Hook sidecar does not expose a supported version. Exposed versions: %v, supported versions: %v",
+			info.GetVersions(), []string{hooksV1alpha1.Version, hooksV1alpha2.Version})
 }
 
 func sortCallbacksPerHookPoint(callbacksPerHookPoint map[string][]*callBackClient) {
