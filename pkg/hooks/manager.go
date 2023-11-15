@@ -163,7 +163,7 @@ func processSideCarSocket(socketPath string) (*callBackClient, bool, error) {
 
 	// The order matters. We should match newer versions first.
 	supportedVersions := []string{
-		hooksV1alpha3.Version
+		hooksV1alpha3.Version,
 		hooksV1alpha2.Version,
 		hooksV1alpha1.Version,
 	}
