@@ -23,6 +23,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"strings"
 	"time"
 
 	"kubevirt.io/kubevirt/tests/decorators"
@@ -215,6 +216,40 @@ var _ = Describe("[sig-compute]HookSidecars", decorators.SigCompute, func() {
 				}, 30*time.Second, time.Second).Should(
 					BeTrue(),
 					fmt.Sprintf("the %s container must fail if it was not provided the hook version to advertise itself", sidecarContainerName))
+			})
+		})
+
+		Context("with sidecar-shim", func() {
+			It("should receive Terminal signal on VMI deletion", func() {
+				vmi, err = virtClient.VirtualMachineInstance(testsuite.GetTestNamespace(nil)).Create(context.Background(), vmi)
+				Expect(err).ToNot(HaveOccurred())
+				libwait.WaitForSuccessfulVMIStart(vmi)
+
+				time.Sleep(100 * time.Millisecond)
+				err = virtClient.VirtualMachineInstance(vmi.Namespace).Delete(context.Background(), vmi.Name, &metav1.DeleteOptions{})
+				Expect(err).ToNot(HaveOccurred())
+
+				Eventually(func() bool {
+					vmiPod, exists, err := getVMIPod(vmi)
+					if err != nil {
+						Expect(err).NotTo(HaveOccurred(), "must be able to retrieve the VMI virt-launcher pod")
+					} else if !exists {
+						return false
+					}
+
+					var tailLines int64 = 100
+					logsRaw, err := virtClient.CoreV1().
+						Pods(vmiPod.GetObjectMeta().GetNamespace()).
+						GetLogs(vmiPod.GetObjectMeta().GetName(), &k8sv1.PodLogOptions{
+							TailLines: &tailLines,
+							Container: sidecarContainerName,
+						}).
+						DoRaw(context.Background())
+					Expect(err).ToNot(HaveOccurred())
+					return strings.Contains(string(logsRaw), "sidecar-shim received signal: terminated")
+				}, 30*time.Second, time.Second).Should(
+					BeTrue(),
+					fmt.Sprintf("%s did not exit?", sidecarContainerName))
 			})
 		})
 
