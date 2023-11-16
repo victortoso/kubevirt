@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"kubevirt.io/kubevirt/tests/decorators"
+	"kubevirt.io/kubevirt/tests/libmigration"
 	"kubevirt.io/kubevirt/tests/util"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -35,17 +36,20 @@ import (
 	k8sv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	v1 "kubevirt.io/api/core/v1"
 	"kubevirt.io/client-go/kubecli"
 
 	"kubevirt.io/kubevirt/pkg/hooks"
 	hooksv1alpha1 "kubevirt.io/kubevirt/pkg/hooks/v1alpha1"
 	hooksv1alpha2 "kubevirt.io/kubevirt/pkg/hooks/v1alpha2"
+	hooksv1alpha3 "kubevirt.io/kubevirt/pkg/hooks/v1alpha3"
 	virtconfig "kubevirt.io/kubevirt/pkg/virt-config"
 	"kubevirt.io/kubevirt/tests"
 	"kubevirt.io/kubevirt/tests/clientcmd"
 	cd "kubevirt.io/kubevirt/tests/containerdisk"
 	"kubevirt.io/kubevirt/tests/flags"
+	"kubevirt.io/kubevirt/tests/framework/checks"
 	"kubevirt.io/kubevirt/tests/framework/kubevirt"
 	"kubevirt.io/kubevirt/tests/libwait"
 	"kubevirt.io/kubevirt/tests/testsuite"
@@ -251,6 +255,54 @@ var _ = Describe("[sig-compute]HookSidecars", decorators.SigCompute, func() {
 					BeTrue(),
 					fmt.Sprintf("%s did not exit?", sidecarContainerName))
 			})
+
+			DescribeTable("with USBHostDevice configuration", func(hookVersion string, sidecarShouldTerminate bool) {
+				checks.SkipIfMigrationIsNotPossible()
+
+				vmi.ObjectMeta.Annotations = RenderSidecar(hookVersion)
+				vmi, err = virtClient.VirtualMachineInstance(testsuite.GetTestNamespace(nil)).Create(context.Background(), vmi)
+				Expect(err).ToNot(HaveOccurred())
+				sourcePod, exists, err := getVMIPod(vmi)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(exists).To(BeTrue())
+
+				sourceName := sourcePod.GetObjectMeta().GetName()
+
+				migration := tests.NewRandomMigration(vmi.Name, vmi.Namespace)
+				libmigration.RunMigrationAndExpectToCompleteWithDefaultTimeout(virtClient, migration)
+
+				targetPod, exists, err := getVMIPod(vmi)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(exists).To(BeTrue())
+
+				Expect(sourcePod.Name).ToNot(Equal(targetPod.Name))
+
+				Eventually(func() bool {
+					pods, err := virtClient.CoreV1().Pods("").List(
+						context.Background(),
+						metav1.ListOptions{
+							FieldSelector: fields.ParseSelectorOrDie("metadata.name=" + sourceName).String(),
+						})
+					Expect(err).ToNot(HaveOccurred())
+					Expect(pods.Items).To(HaveLen(1))
+					computeTerminated := false
+					sidecarTerminated := false
+					for _, container := range pods.Items[0].Status.ContainerStatuses {
+						hasTerminated := container.State.Terminated != nil
+						switch container.Name {
+						case "compute":
+							computeTerminated = hasTerminated
+						case sidecarContainerName:
+							sidecarTerminated = hasTerminated
+						}
+					}
+					return computeTerminated && (sidecarTerminated == sidecarShouldTerminate)
+				}, 30*time.Second, 1*time.Second).Should(BeTrue())
+			},
+				// See: https://github.com/kubevirt/kubevirt/issues/8395#issuecomment-1619187827
+				Entry("Fails to terminate on migration with < v1alpha3", hooksv1alpha2.Version, false),
+				Entry("Terminates properly on migration with >= v1alpha3", hooksv1alpha3.Version, true),
+			)
 		})
 
 		Context("with ConfigMap in sidecar hook annotation", func() {
