@@ -308,7 +308,7 @@ func main() {
 
 	select {
 	case s := <-signalStopChan:
-		log.Log.Infof("Received signal %s", s.String())
+		log.Log.Infof("sidecar-shim received signal: %s", s.String())
 	case err = <-errChan:
 		log.Log.Reason(err).Error("Failed to run grpc server")
 	case <-shutdownChan:
