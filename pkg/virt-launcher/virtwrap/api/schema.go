@@ -30,6 +30,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	libvirtxml "libvirt.org/go/libvirtxml"
 
 	v1 "kubevirt.io/api/core/v1"
 	"kubevirt.io/client-go/precond"
@@ -491,26 +492,26 @@ type MemoryDevice struct {
 }
 
 type Devices struct {
-	Emulator    string             `xml:"emulator,omitempty"`
-	Interfaces  []Interface        `xml:"interface"`
-	Channels    []Channel          `xml:"channel"`
-	HostDevices []HostDevice       `xml:"hostdev,omitempty"`
-	Controllers []Controller       `xml:"controller,omitempty"`
-	Video       []Video            `xml:"video"`
-	Graphics    []Graphics         `xml:"graphics"`
-	Ballooning  *MemBalloon        `xml:"memballoon,omitempty"`
-	Disks       []Disk             `xml:"disk"`
-	Inputs      []Input            `xml:"input"`
-	Serials     []Serial           `xml:"serial"`
-	Consoles    []Console          `xml:"console"`
-	Watchdogs   []Watchdog         `xml:"watchdog,omitempty"`
-	Rng         *Rng               `xml:"rng,omitempty"`
-	Filesystems []FilesystemDevice `xml:"filesystem,omitempty"`
-	Redirs      []RedirectedDevice `xml:"redirdev,omitempty"`
-	SoundCards  []SoundCard        `xml:"sound,omitempty"`
-	TPMs        []TPM              `xml:"tpm,omitempty"`
-	VSOCK       *VSOCK             `xml:"vsock,omitempty"`
-	Memory      *MemoryDevice      `xml:"memory,omitempty"`
+	Emulator    string                   `xml:"emulator,omitempty"`
+	Interfaces  []Interface              `xml:"interface"`
+	Channels    []Channel                `xml:"channel"`
+	HostDevices []HostDevice             `xml:"hostdev,omitempty"`
+	Controllers []Controller             `xml:"controller,omitempty"`
+	Video       []Video                  `xml:"video"`
+	Graphics    []Graphics               `xml:"graphics"`
+	Ballooning  *MemBalloon              `xml:"memballoon,omitempty"`
+	Disks       []Disk                   `xml:"disk"`
+	Inputs      []Input                  `xml:"input"`
+	Serials     []Serial                 `xml:"serial"`
+	Consoles    []Console                `xml:"console"`
+	Watchdogs   []Watchdog               `xml:"watchdog,omitempty"`
+	Rng         *Rng                     `xml:"rng,omitempty"`
+	Filesystems []FilesystemDevice       `xml:"filesystem,omitempty"`
+	Redirs      []RedirectedDevice       `xml:"redirdev,omitempty"`
+	SoundCards  []libvirtxml.DomainSound `xml:"sound,omitempty"`
+	TPMs        []TPM                    `xml:"tpm,omitempty"`
+	VSOCK       *VSOCK                   `xml:"vsock,omitempty"`
+	Memory      *MemoryDevice            `xml:"memory,omitempty"`
 }
 
 type TPM struct {
@@ -1058,15 +1059,6 @@ type ChannelSource struct {
 }
 
 //END Channel --------------------
-
-//BEGIN Sound -------------------
-
-type SoundCard struct {
-	Alias *Alias `xml:"alias,omitempty"`
-	Model string `xml:"model,attr"`
-}
-
-//END Sound -------------------
 
 //BEGIN Video -------------------
 
