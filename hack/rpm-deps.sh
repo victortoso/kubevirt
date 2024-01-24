@@ -103,6 +103,7 @@ launcherbase_aarch64="
   edk2-aarch64-${EDK2_VERSION}
   qemu-kvm-device-display-virtio-gpu-${QEMU_VERSION}
   qemu-kvm-device-display-virtio-gpu-pci-${QEMU_VERSION}
+  qemu-kvm-device-usb-redirect-${QEMU_VERSION}
 "
 launcherbase_extra="
   ethtool
