@@ -1059,12 +1059,16 @@ func (l *LibvirtDomainManager) SyncVMI(vmi *v1.VirtualMachineInstance, allowEmul
 				return nil, err
 			}
 
-			dom, err = withNetworkIfacesResources(
-				vmi, &domain.Spec,
+			dom, err = withNetworkIfacesResources(vmi, &domain.Spec,
 				func(v *v1.VirtualMachineInstance, s *api.DomainSpec) (cli.VirDomain, error) {
-					return l.setDomainSpecWithHooks(v, s)
+					return l.setDomainSpec(v, s)
 				},
 			)
+			if err != nil {
+				return nil, err
+			}
+
+			dom, err = l.setDomainSpecWithHooks(vmi, &domain.Spec)
 			if err != nil {
 				return nil, err
 			}
@@ -1836,6 +1840,14 @@ func (l *LibvirtDomainManager) ListAllDomains() ([]*api.Domain, error) {
 
 func (l *LibvirtDomainManager) setDomainSpecWithHooks(vmi *v1.VirtualMachineInstance, origSpec *api.DomainSpec) (cli.VirDomain, error) {
 	return util.SetDomainSpecStrWithHooks(l.virConn, vmi, origSpec)
+}
+
+func (l *LibvirtDomainManager) setDomainSpec(vmi *v1.VirtualMachineInstance, origSpec *api.DomainSpec) (cli.VirDomain, error) {
+	if domainSpecXML, err := xml.Marshal(origSpec); err != nil {
+		return nil, fmt.Errorf("Failed to marshal domain spec: %v", domainSpecXML)
+	} else {
+		return util.SetDomainSpecStr(l.virConn, vmi, string(domainSpecXML))
+	}
 }
 
 func (l *LibvirtDomainManager) GetQemuVersion() (string, error) {

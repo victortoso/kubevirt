@@ -179,6 +179,7 @@ func indexedDomainInterfaces(domain *api.Domain) map[string]api.Interface {
 // The dependent devices are left in the configuration, to allow future hotplug.
 func withNetworkIfacesResources(vmi *v1.VirtualMachineInstance, domainSpec *api.DomainSpec, f func(v *v1.VirtualMachineInstance, s *api.DomainSpec) (cli.VirDomain, error)) (cli.VirDomain, error) {
 	domainSpecWithIfacesResource := appendPlaceholderInterfacesToTheDomain(vmi, domainSpec)
+
 	dom, err := f(vmi, domainSpecWithIfacesResource)
 	if err != nil {
 		return nil, err
@@ -197,6 +198,8 @@ func withNetworkIfacesResources(vmi *v1.VirtualMachineInstance, domainSpec *api.
 	// getting the domain spec (e.g. the `qemu:commandline` section).
 	domainSpecWithoutIfacePlaceholders.Devices.DeepCopyInto(&domainSpec.Devices)
 
+	// update wantedSpec before setting it to libvirt
+	domainSpecWithoutIfacePlaceholders.DeepCopyInto(domainSpec)
 	return f(vmi, domainSpec)
 }
 
