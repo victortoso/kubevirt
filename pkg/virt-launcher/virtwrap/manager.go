@@ -1059,12 +1059,16 @@ func (l *LibvirtDomainManager) SyncVMI(vmi *v1.VirtualMachineInstance, allowEmul
 				return nil, err
 			}
 
-			dom, err = withNetworkIfacesResources(
-				vmi, &domain.Spec,
-				func(v *v1.VirtualMachineInstance, s *api.DomainSpec) (cli.VirDomain, error) {
-					return l.setDomainSpecWithHooks(v, s)
-				},
-			)
+			dom, err = l.setDomainSpecWithHooks(vmi, &domain.Spec)
+			/*
+				FIXME: This is wrong
+						dom, err = withNetworkIfacesResources(
+							vmi, &domain.Spec,
+							func(v *v1.VirtualMachineInstance, s *api.DomainSpec) (cli.VirDomain, error) {
+								return l.setDomainSpecWithHooks(v, s)
+							},
+						)
+			*/
 			if err != nil {
 				return nil, err
 			}
