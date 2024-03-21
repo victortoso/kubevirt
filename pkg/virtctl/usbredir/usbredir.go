@@ -58,6 +58,163 @@ type usbredirCommand struct {
 	clientConfig clientcmd.ClientConfig
 }
 
+type ClientConnectFn func(device, address string) error
+
+type Client struct {
+	// To connect local USB device buffer to the remote VM using the websocket.
+	inputReader  *io.PipeReader
+	inputWriter  *io.PipeWriter
+	outputReader *io.PipeReader
+	outputWriter *io.PipeWriter
+
+	listener *net.TCPListener
+
+	// channels
+	done   chan struct{}
+	stream chan error
+	local  chan error
+	remote chan error
+
+	ClientConnect ClientConnectFn
+}
+
+func NewUSBRedirClient() *Client {
+	inReader, inWriter := io.Pipe()
+	outReader, outWriter := io.Pipe()
+	return &Client{
+		inputReader:   inReader,
+		inputWriter:   inWriter,
+		outputReader:  outReader,
+		outputWriter:  outWriter,
+		ClientConnect: clientConnect,
+	}
+}
+
+func (k *Client) WithRemoteVMIStream(usbredirStream kubecli.StreamInterface) *Client {
+	k.stream = make(chan error)
+
+	go func() {
+		defer k.outputWriter.Close()
+		k.stream <- usbredirStream.Stream(
+			kubecli.StreamOptions{
+				In:  k.inputReader,
+				Out: k.outputWriter,
+			},
+		)
+	}()
+
+	return k
+}
+
+func (k *Client) WithLocalTCPClient(address string) *Client {
+	lnAddr, err := net.ResolveTCPAddr("tcp", address)
+	if err != nil {
+		log.Log.Errorf("Can't resolve the address: %s", err.Error())
+		return nil
+	}
+
+	// The local tcp server is used to proxy between remote websocket and local USB
+	k.listener, err = net.ListenTCP("tcp", lnAddr)
+	if err != nil {
+		log.Log.Errorf("Can't listen on unix socket: %s", err.Error())
+		return nil
+	}
+
+	return k
+}
+
+func (k *Client) ConnectRemote() {
+	// forward data to/from websocket after usbredir client connects.
+	k.done = make(chan struct{}, 1)
+	k.remote = make(chan error)
+	go func() {
+		defer k.inputWriter.Close()
+		start := time.Now()
+
+		usbredirConn, err := k.listener.Accept()
+		if err != nil {
+			log.Log.V(2).Infof("Failed to accept connection: %s", err.Error())
+			k.remote <- err
+			return
+		}
+		defer usbredirConn.Close()
+
+		log.Log.V(2).Infof("Connected to %s at %v", usbredirClient, time.Now().Sub(start))
+
+		stream := make(chan error)
+		// write to local usbredir from pipeOutReader
+		go func() {
+			_, err := io.Copy(usbredirConn, k.outputReader)
+			stream <- err
+		}()
+
+		// read from local usbredir towards pipeInWriter
+		go func() {
+			_, err := io.Copy(k.inputWriter, usbredirConn)
+			stream <- err
+		}()
+
+		select {
+		case <-k.done: // Wait for local usbredir to complete
+		case err = <-stream: // Wait for remote connection to close
+			if err == nil {
+				// Remote connection closed, report this as error
+				err = fmt.Errorf("Remote connection has closed.")
+			}
+		}
+
+		// Wait for local usbredir to complete
+		k.remote <- err
+	}()
+}
+
+func clientConnect(device, address string) error {
+	bin := usbredirClient
+	args := []string{}
+	args = append(args, "--device", device, "--to", address)
+
+	log.Log.Infof("port_arg: '%s'", address)
+	log.Log.Infof("args: '%v'", args)
+	log.Log.Infof("Executing commandline: '%s %v'", bin, args)
+
+	command := exec.Command(bin, args...)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		log.Log.Errorf("Failed to execute %v due %v, output: %v", bin, err, string(output))
+	} else {
+		log.Log.V(2).Infof("%v output: %v", bin, string(output))
+	}
+	return err
+}
+
+func (k *Client) ConnectLocal(device string) {
+	// execute local usbredir binary
+	address := k.listener.Addr().String()
+	k.local = make(chan error)
+	go func() {
+		defer close(k.done)
+		k.local <- k.ClientConnect(device, address)
+	}()
+}
+
+func (k *Client) Run() error {
+	var err error
+
+	interrupt := make(chan os.Signal, 1)
+	go func() {
+		signal.Notify(interrupt, os.Interrupt)
+		<-interrupt
+	}()
+
+	select {
+	case <-interrupt:
+	case err = <-k.stream:
+	case err = <-k.local:
+	case err = <-k.remote:
+	}
+	return err
+}
+
 func (usbredirCmd *usbredirCommand) Run(command *cobra.Command, args []string) error {
 	if _, err := exec.LookPath(usbredirClient); err != nil {
 		return fmt.Errorf("Error on finding %s in $PATH: %s", usbredirClient, err.Error())
@@ -82,116 +239,13 @@ func (usbredirCmd *usbredirCommand) Run(command *cobra.Command, args []string) e
 		return fmt.Errorf("Can't access VMI %s: %s", vmiArg, err.Error())
 	}
 
-	// We will connect the local USB device using a usbredir TCP client to the
-	// remote VM using the websocket.
-	pipeInReader, pipeInWriter := io.Pipe()
-	pipeOutReader, pipeOutWriter := io.Pipe()
+	usbredirClient := NewUSBRedirClient().
+		WithRemoteVMIStream(usbredirVMI).
+		WithLocalTCPClient("localhost:0")
 
-	// Configure in/out and start stream with websocket
-	k8ResChan := make(chan error)
-	go func() {
-		defer pipeOutWriter.Close()
-		k8ResChan <- usbredirVMI.Stream(kubecli.StreamOptions{
-			In:  pipeInReader,
-			Out: pipeOutWriter,
-		})
-	}()
-
-	lnAddr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("localhost:0"))
-	if err != nil {
-		return fmt.Errorf("Can't resolve the address: %s", err.Error())
-	}
-
-	// The local tcp server is used to proxy between remote websocket and local USB
-	ln, err := net.ListenTCP("tcp", lnAddr)
-	if err != nil {
-		return fmt.Errorf("Can't listen on unix socket: %s", err.Error())
-	}
-
-	// forward data to/from websocket after usbredir client connects.
-	usbredirDoneChan := make(chan struct{}, 1)
-	streamResChan := make(chan error)
-	go func() {
-		defer pipeInWriter.Close()
-		start := time.Now()
-
-		usbredirConn, err := ln.Accept()
-		if err != nil {
-			log.Log.V(2).Infof("Failed to accept connection: %s", err.Error())
-			streamResChan <- err
-			return
-		}
-		defer usbredirConn.Close()
-
-		log.Log.V(2).Infof("Connected to %s at %v", usbredirClient, time.Now().Sub(start))
-
-		streamStop := make(chan error)
-		// write to local usbredir from pipeOutReader
-		go func() {
-			_, err := io.Copy(usbredirConn, pipeOutReader)
-			streamStop <- err
-		}()
-
-		// read from local usbredir towards pipeInWriter
-		go func() {
-			_, err := io.Copy(pipeInWriter, usbredirConn)
-			streamStop <- err
-		}()
-
-		select {
-		case <-usbredirDoneChan: // Wait for local usbredir to complete
-		case err = <-streamStop: // Wait for remote connection to close
-			if err == nil {
-				// Remote connection closed, report this as error
-				err = fmt.Errorf("Remote connection has closed.")
-			}
-		}
-
-		streamResChan <- err
-	}()
-
-	address := ln.Addr().String()
-
-	// execute local usbredir binary
-	usbredirExecResChan := make(chan error)
-	go func() {
-		defer close(usbredirDoneChan)
-
-		bin := usbredirClient
-		args := []string{}
-		args = append(args, "--device", usbdeviceArg, "--to", address)
-
-		log.Log.Infof("hostaddr: '%s'", address)
-		log.Log.Infof("args: '%v'", args)
-		log.Log.Infof("Executing commandline: '%s %v'", bin, args)
-
-		command := exec.Command(bin, args...)
-		output, err := command.CombinedOutput()
-		if err != nil {
-			log.Log.Errorf("Failed to execut %v due %v, output: %v", bin, err, string(output))
-		} else {
-			log.Log.V(2).Infof("%v output: %v", bin, string(output))
-		}
-		usbredirExecResChan <- err
-	}()
-
-	interrupt := make(chan os.Signal, 1)
-	go func() {
-		signal.Notify(interrupt, os.Interrupt)
-		<-interrupt
-	}()
-
-	select {
-	case <-interrupt:
-	case err = <-k8ResChan:
-	case err = <-usbredirExecResChan:
-	case err = <-streamResChan:
-	}
-
-	if err != nil {
-		return fmt.Errorf("Error encountered: %s", err.Error())
-	}
-	return nil
+	usbredirClient.ConnectRemote()
+	usbredirClient.ConnectLocal(usbdeviceArg)
+	return usbredirClient.Run()
 }
 
 func usage() string {
