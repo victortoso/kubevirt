@@ -20,6 +20,7 @@
 package usbredir
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -32,7 +33,7 @@ import (
 	"kubevirt.io/client-go/log"
 )
 
-type ClientConnectFn func(device, address string) error
+type ClientConnectFn func(device, address string, stop chan struct{}) error
 
 type Client struct {
 	// To connect local USB device buffer to the remote VM using the websocket.
@@ -43,8 +44,11 @@ type Client struct {
 
 	listener *net.TCPListener
 
+	stopped bool
+
 	// channels
 	done   chan struct{}
+	stop   chan struct{}
 	stream chan error
 	local  chan error
 	remote chan error
@@ -56,6 +60,7 @@ func NewUSBRedirClient() *Client {
 	inReader, inWriter := io.Pipe()
 	outReader, outWriter := io.Pipe()
 	return &Client{
+		stop:          make(chan struct{}),
 		inputReader:   inReader,
 		inputWriter:   inWriter,
 		outputReader:  outReader,
@@ -64,17 +69,30 @@ func NewUSBRedirClient() *Client {
 	}
 }
 
+func (k *Client) Stop() {
+	k.stopped = true
+	k.stop <- struct{}{}
+}
+
 func (k *Client) WithRemoteVMIStream(usbredirStream kubecli.StreamInterface) *Client {
 	k.stream = make(chan error)
 
 	go func() {
 		defer k.outputWriter.Close()
-		k.stream <- usbredirStream.Stream(
-			kubecli.StreamOptions{
-				In:  k.inputReader,
-				Out: k.outputWriter,
-			},
-		)
+		errch := make(chan error)
+		go func() {
+			errch <- usbredirStream.Stream(
+				kubecli.StreamOptions{
+					In:  k.inputReader,
+					Out: k.outputWriter,
+				},
+			)
+		}()
+		select {
+		case <-k.stop:
+		case err := <-errch:
+			k.stream <- err
+		}
 	}()
 
 	return k
@@ -129,9 +147,10 @@ func (k *Client) ConnectRemote() {
 		}()
 
 		select {
+		case <-k.stop: // outside request to stop
 		case <-k.done: // Wait for local usbredir to complete
 		case err = <-stream: // Wait for remote connection to close
-			if err == nil {
+			if err == nil && !k.stopped {
 				// Remote connection closed, report this as error
 				err = fmt.Errorf("Remote connection has closed.")
 			}
@@ -142,7 +161,7 @@ func (k *Client) ConnectRemote() {
 	}()
 }
 
-func clientConnect(device, address string) error {
+func clientConnect(device, address string, stop chan struct{}) error {
 	bin := usbredirClient
 	args := []string{}
 	args = append(args, "--device", device, "--to", address)
@@ -151,13 +170,25 @@ func clientConnect(device, address string) error {
 	log.Log.Infof("args: '%v'", args)
 	log.Log.Infof("Executing commandline: '%s %v'", bin, args)
 
-	command := exec.Command(bin, args...)
-	output, err := command.CombinedOutput()
-	if err != nil {
-		log.Log.Errorf("Failed to execute %v due %v, output: %v", bin, err, string(output))
-	} else {
+	ctx, cancelFn := context.WithCancel(context.Background())
+	command := exec.CommandContext(ctx, bin, args...)
+	done := make(chan error)
+	go func() {
+		output, err := command.CombinedOutput()
 		log.Log.V(2).Infof("%v output: %v", bin, string(output))
+		done <- err
+	}()
+
+	var err error
+	select {
+	case err = <-done:
+		if err != nil {
+			log.Log.Errorf("Failed to execute %v due %v", bin, err)
+		}
+	case <-stop:
+		// will stop with cancelFn()
 	}
+	cancelFn()
 	return err
 }
 
@@ -167,7 +198,7 @@ func (k *Client) ConnectLocal(device string) {
 	k.local = make(chan error)
 	go func() {
 		defer close(k.done)
-		k.local <- k.ClientConnect(device, address)
+		k.local <- k.ClientConnect(device, address, k.stop)
 	}()
 }
 
@@ -182,6 +213,7 @@ func (k *Client) Run() error {
 	case err = <-k.stream:
 	case err = <-k.local:
 	case err = <-k.remote:
+	case <-k.stop:
 	}
 	return err
 }
