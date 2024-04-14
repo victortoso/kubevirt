@@ -12024,6 +12024,20 @@
       "name": "namespace",
       "in": "path",
       "required": true
+     },
+     {
+      "uniqueItems": true,
+      "type": "string",
+      "description": "Provides Product of USB device",
+      "name": "product",
+      "in": "query"
+     },
+     {
+      "uniqueItems": true,
+      "type": "string",
+      "description": "Provides Vendor of USB device",
+      "name": "vendor",
+      "in": "query"
      }
     ]
    },
@@ -13700,6 +13714,20 @@
       "name": "namespace",
       "in": "path",
       "required": true
+     },
+     {
+      "uniqueItems": true,
+      "type": "string",
+      "description": "Provides Product of USB device",
+      "name": "product",
+      "in": "query"
+     },
+     {
+      "uniqueItems": true,
+      "type": "string",
+      "description": "Provides Vendor of USB device",
+      "name": "vendor",
+      "in": "query"
      }
     ]
    },

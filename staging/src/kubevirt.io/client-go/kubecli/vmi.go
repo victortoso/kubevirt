@@ -163,8 +163,11 @@ func RequestFromConfig(config *rest.Config, resource, name, namespace, subresour
 	return req, nil
 }
 
-func (v *vmis) USBRedir(name string) (StreamInterface, error) {
-	return asyncSubresourceHelper(v.config, v.resource, v.namespace, name, "usbredir", url.Values{})
+func (v *vmis) USBRedir(name, vendor, product string) (StreamInterface, error) {
+	queryParams := url.Values{}
+	queryParams.Add("vendor", vendor)
+	queryParams.Add("product", product)
+	return asyncSubresourceHelper(v.config, v.resource, v.namespace, name, "usbredir", queryParams)
 }
 
 func (v *vmis) VNC(name string) (StreamInterface, error) {

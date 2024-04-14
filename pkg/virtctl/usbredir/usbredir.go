@@ -71,7 +71,7 @@ func (usbredirCmd *usbredirCommand) Run(command *cobra.Command, args []string) e
 	usbdeviceArg := args[0]
 
 	// Get connection to the websocket for usbredir subresource
-	usbredirVMI, err := virtCli.VirtualMachineInstance(namespace).USBRedir(vmiArg)
+	usbredirVMI, err := virtCli.VirtualMachineInstance(namespace).USBRedir(vmiArg, "vendor1", "product2")
 	if err != nil {
 		return fmt.Errorf("Can't access VMI %s: %s", vmiArg, err.Error())
 	}

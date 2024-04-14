@@ -246,7 +246,7 @@ type StreamInterface interface {
 type VirtualMachineInstanceInterface interface {
 	kvcorev1.VirtualMachineInstanceInterface
 	SerialConsole(name string, options *SerialConsoleOptions) (StreamInterface, error)
-	USBRedir(vmiName string) (StreamInterface, error)
+	USBRedir(vmiName, vendor, product string) (StreamInterface, error)
 	VNC(name string) (StreamInterface, error)
 	Screenshot(ctx context.Context, name string, options *v1.ScreenshotOptions) ([]byte, error)
 	PortForward(name string, port int, protocol string) (StreamInterface, error)

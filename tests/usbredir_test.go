@@ -74,7 +74,7 @@ var _ = Describe("[crit:medium][vendor:cnv-qe@redhat.com][level:component][sig-c
 		})
 
 		It("should fail to connect to VMI's usbredir socket", func() {
-			usbredirVMI, err := virtClient.VirtualMachineInstance(vmi.ObjectMeta.Namespace).USBRedir(vmi.ObjectMeta.Name)
+			usbredirVMI, err := virtClient.VirtualMachineInstance(vmi.ObjectMeta.Namespace).USBRedir(vmi.ObjectMeta.Name, "vendor3", "product4")
 			Expect(err).To(HaveOccurred())
 			Expect(usbredirVMI).To(BeNil())
 		})
@@ -158,7 +158,7 @@ func runConnectGoroutine(
 	errch chan error,
 ) {
 	defer GinkgoRecover()
-	usbredirStream, err := virtClient.VirtualMachineInstance(vmi.ObjectMeta.Namespace).USBRedir(vmi.ObjectMeta.Name)
+	usbredirStream, err := virtClient.VirtualMachineInstance(vmi.ObjectMeta.Namespace).USBRedir(vmi.ObjectMeta.Name, "vendor5", "product7")
 	if err != nil {
 		errch <- err
 		return

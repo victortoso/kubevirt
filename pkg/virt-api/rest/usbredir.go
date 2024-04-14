@@ -8,8 +8,10 @@ import (
 
 	v1 "kubevirt.io/api/core/v1"
 	"kubevirt.io/client-go/kubecli"
+	"kubevirt.io/client-go/log"
 
 	apimetrics "kubevirt.io/kubevirt/pkg/monitoring/metrics/virt-api"
+	"kubevirt.io/kubevirt/pkg/virt-api/definitions"
 )
 
 func (app *SubresourceAPIApp) USBRedirRequestHandler(request *restful.Request, response *restful.Response) {
@@ -23,6 +25,10 @@ func (app *SubresourceAPIApp) USBRedirRequestHandler(request *restful.Request, r
 			return conn.USBRedirURI(vmi)
 		}),
 	)
+
+	log.Log.Infof("============= %s ===== %s =============",
+		request.QueryParameter(definitions.VendorParamName),
+		request.QueryParameter(definitions.ProductParamName))
 
 	streamer.Handle(request, response)
 }
