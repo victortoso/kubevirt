@@ -1,11 +1,14 @@
-load("@io_bazel_rules_go//go:def.bzl", "go_library")
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+load("@bazeldnf//:deps.bzl", "tar2files")
 
 go_library(
     name = "go_default_library",
     srcs = [
         "client.go",
+        "hwdata.go",
         "usbredir.go",
     ],
+    embedsrcs = ["hwdata-usb.ids"],
     importpath = "kubevirt.io/kubevirt/pkg/virtctl/usbredir",
     visibility = ["//visibility:public"],
     deps = [
@@ -14,5 +17,38 @@ go_library(
         "//staging/src/kubevirt.io/client-go/log:go_default_library",
         "//vendor/github.com/spf13/cobra:go_default_library",
         "//vendor/k8s.io/client-go/tools/clientcmd:go_default_library",
+    ],
+)
+
+genrule(
+    name = "hwdata-file",
+    srcs = [":hwdata-files/usr/share/hwdata/usb.ids"],
+    outs = ["hwdata-usb.ids"],
+    cmd = "cp $(location :hwdata-files/usr/share/hwdata/usb.ids) $@",
+)
+
+tar2files(
+    name = "hwdata-files",
+    files = {
+        "/usr/share/hwdata": [
+            "usb.ids",
+        ],
+    },
+    tar = "//rpm:virtctl-usbredir_x86_64",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "go_default_test",
+    srcs = [
+        "hwdata_test.go",
+        "usbredir_suite_test.go",
+    ],
+    data = glob(["testdata/**"]),
+    embed = [":go_default_library"],
+    deps = [
+        "//staging/src/kubevirt.io/client-go/testutils:go_default_library",
+        "//vendor/github.com/onsi/ginkgo/v2:go_default_library",
+        "//vendor/github.com/onsi/gomega:go_default_library",
     ],
 )
