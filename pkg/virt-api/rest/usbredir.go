@@ -26,11 +26,18 @@ func (app *SubresourceAPIApp) USBRedirRequestHandler(request *restful.Request, r
 		}),
 	)
 
-	log.Log.Infof("============= %s ===== %s =============",
-		request.QueryParameter(definitions.VendorParamName),
-		request.QueryParameter(definitions.ProductParamName))
+	name, namespace := request.PathParameter("name"), request.PathParameter("namespace")
+	vendor := request.QueryParameter(definitions.VendorParamName)
+	product := request.QueryParameter(definitions.ProductParamName)
+	if err := app.vmUsbredirPatchAddStatus(name, namespace, vendor, product); err != nil {
+		log.Log.Reason(err).Info("Failed to patch VMI status")
+	}
 
 	streamer.Handle(request, response)
+
+	if err := app.vmUsbredirPatchRemoveStatus(name, namespace, vendor, product); err != nil {
+		log.Log.Reason(err).Info("Failed to patch VMI status")
+	}
 }
 
 func validateVMIForUSBRedir(vmi *v1.VirtualMachineInstance) *errors.StatusError {

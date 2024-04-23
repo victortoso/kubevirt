@@ -294,6 +294,11 @@ type VirtualMachineInstanceStatus struct {
 	// Memory shows various informations about the VirtualMachine memory.
 	// +optional
 	Memory *MemoryStatus `json:"memory,omitempty"`
+
+	// Clientpassthrough indicates a list of devices that are currently being redirected from remote
+	// devices to the running VMI
+	// +optional
+	ClientPassthrough *ClientPassthroughStatus `json:"clientPassthrough,omitempty"`
 }
 
 // PersistentVolumeClaimInfo contains the relavant information virt-handler needs cached about a PVC
@@ -1654,6 +1659,20 @@ type VirtualMachineCondition struct {
 	LastTransitionTime metav1.Time `json:"lastTransitionTime,omitempty"`
 	Reason             string      `json:"reason,omitempty"`
 	Message            string      `json:"message,omitempty"`
+}
+
+type ClientPassthroughStatus struct {
+	// Redirected USB devices
+	// +optional
+	// +listType=atomic
+	USB []USBDeviceInfo `json:"usb,omitempty"`
+}
+
+type USBDeviceInfo struct {
+	Vendor      string `json:"vendor"`
+	Product     string `json:"product"`
+	VendorName  string `json:"vendorName,omitempty"`
+	ProductName string `json:"productName,omitempty"`
 }
 
 type VirtualMachineConditionType string

@@ -12011,6 +12011,29 @@ var CRDsValidation map[string]string = map[string]string{
           description: ActivePods is a mapping of pod UID to node name. It is possible
             for multiple pods to be running for a single VMI during migration.
           type: object
+        clientPassthrough:
+          description: Clientpassthrough indicates a list of devices that are currently
+            being redirected from remote devices to the running VMI
+          properties:
+            usb:
+              description: Redirected USB devices
+              items:
+                properties:
+                  product:
+                    type: string
+                  productName:
+                    type: string
+                  vendor:
+                    type: string
+                  vendorName:
+                    type: string
+                required:
+                - product
+                - vendor
+                type: object
+              type: array
+              x-kubernetes-list-type: atomic
+          type: object
         conditions:
           description: Conditions are specific points in VirtualMachineInstance's
             pod runtime.
