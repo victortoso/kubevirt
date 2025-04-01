@@ -90,9 +90,9 @@ func cellToCell(cell libvirtxml.CapsHostNUMACell) *cmdv1.Cell {
 		c.Memory = &cmdv1.Memory{
 			Amount: cell.Memory.Size,
 			Unit:   cell.Memory.Unit,
-		},
+		}
 	}
-	
+
 	for _, page := range cell.PageInfo {
 		c.Pages = append(c.Pages, pageToPage(page))
 	}
