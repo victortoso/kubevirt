@@ -21,6 +21,8 @@ package hooks
 
 import (
 	"context"
+	_ "embed"
+	"encoding/xml"
 	"fmt"
 	"net"
 	"os"
@@ -33,8 +35,10 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	v1 "kubevirt.io/api/core/v1"
 	hooksInfo "kubevirt.io/kubevirt/pkg/hooks/info"
 	hooksV1alpha3 "kubevirt.io/kubevirt/pkg/hooks/v1alpha3"
+	virtwrapApi "kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
 )
 
 type dynamicInfoServer struct {
@@ -44,7 +48,7 @@ type dynamicInfoServer struct {
 }
 
 func (s dynamicInfoServer) Info(ctx context.Context, params *hooksInfo.InfoParams) (*hooksInfo.InfoResult, error) {
-	fmt.Fprintf(GinkgoWriter, "Hook's Info method has been called")
+	GinkgoWriter.Println("Hook's Info method has been called")
 
 	return &hooksInfo.InfoResult{
 		Name: s.hookName,
@@ -60,6 +64,40 @@ func (s dynamicInfoServer) Info(ctx context.Context, params *hooksInfo.InfoParam
 	}, nil
 }
 
+type callbackServer struct {
+	done chan struct{}
+}
+
+func (s callbackServer) OnDefineDomain(
+	_ context.Context,
+	params *hooksV1alpha3.OnDefineDomainParams,
+) (*hooksV1alpha3.OnDefineDomainResult, error) {
+	GinkgoWriter.Println("Hook's OnDefineDomain method has been called")
+
+	return &hooksV1alpha3.OnDefineDomainResult{
+		DomainXML: params.GetDomainXML(),
+	}, nil
+}
+
+func (s callbackServer) PreCloudInitIso(
+	_ context.Context,
+	params *hooksV1alpha3.PreCloudInitIsoParams,
+) (*hooksV1alpha3.PreCloudInitIsoResult, error) {
+	GinkgoWriter.Println("Hook's PreCloudInitIso method has been called")
+	return &hooksV1alpha3.PreCloudInitIsoResult{
+		CloudInitData: params.GetCloudInitData(),
+	}, nil
+}
+
+func (s callbackServer) Shutdown(
+	_ context.Context,
+	_ *hooksV1alpha3.ShutdownParams,
+) (*hooksV1alpha3.ShutdownResult, error) {
+	GinkgoWriter.Println("Hook's Shutdown method has been called")
+	close(s.done)
+	return &hooksV1alpha3.ShutdownResult{}, nil
+}
+
 func hookListenAndServe(socketPath string, hookName string, hookPointName string, hookPointPriority int32) (net.Listener, error) {
 	socket, err := net.Listen("unix", socketPath)
 	if err != nil {
@@ -72,12 +110,16 @@ func hookListenAndServe(socketPath string, hookName string, hookPointName string
 		hookPointName:     hookPointName,
 		hookPointPriority: hookPointPriority,
 	})
-	fmt.Fprintf(GinkgoWriter, "Starting hook server exposing 'info' services on socket %s", socketPath)
+	hooksV1alpha3.RegisterCallbacksServer(server, callbackServer{done: make(chan struct{})})
 	go func() {
+		GinkgoWriter.Printf("Starting hook server exposing 'info' services on socket %s\n", socketPath)
 		server.Serve(socket)
 	}()
 	return socket, nil
 }
+
+//go:embed testdata/domain.xml
+var domainXML []byte
 
 var _ = Describe("HooksManager", func() {
 	Context("With existing sockets", func() {
@@ -161,6 +203,49 @@ var _ = Describe("HooksManager", func() {
 				Expect(callbackMaps).Should(HaveKey(hook.hookPointName))
 				Expect(callbackMaps[hook.hookPointName]).Should(HaveLen(1))
 			}
+		})
+
+		Context("on calling the methods", func() {
+			It("should call OnDefineDomain", func() {
+				hookPointName := hooksInfo.OnDefineDomainHookPointName
+
+				hookPath := filepath.Join(socketDir, "hook-sidecar-0")
+				os.MkdirAll(hookPath, os.ModePerm)
+				socketPath := filepath.Join(hookPath, "hook1.sock")
+				socket, err := hookListenAndServe(socketPath, "hook1", hookPointName, 0)
+				Expect(err).ToNot(HaveOccurred())
+				defer socket.Close()
+				defer os.Remove(socketPath)
+
+				manager := newManager(socketDir)
+				err = manager.Collect(1, 10*time.Second)
+				Expect(err).ToNot(HaveOccurred())
+
+				callbackMaps := manager.CallbacksPerHookPoint
+				Expect(callbackMaps).Should(HaveKey(hookPointName))
+				Expect(callbackMaps[hookPointName]).Should(HaveLen(1))
+
+				domainSpec := &virtwrapApi.DomainSpec{}
+				err = xml.Unmarshal(domainXML, domainSpec)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(domainSpec).ToNot(BeNil())
+
+				vmi := &v1.VirtualMachineInstance{
+					Spec: v1.VirtualMachineInstanceSpec{
+						Domain: v1.DomainSpec{
+							Devices: v1.Devices{},
+						},
+					},
+				}
+
+				resultXML, err := manager.OnDefineDomain(domainSpec, vmi)
+				Expect(err).ToNot(HaveOccurred())
+
+				resultSpec := &virtwrapApi.DomainSpec{}
+				err = xml.Unmarshal([]byte(resultXML), resultSpec)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(domainSpec).To(Equal(resultSpec))
+			})
 		})
 
 		AfterEach(func() {
