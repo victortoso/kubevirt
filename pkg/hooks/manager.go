@@ -34,6 +34,8 @@ import (
 	v1 "kubevirt.io/api/core/v1"
 	"kubevirt.io/client-go/log"
 
+	"libvirt.org/go/libvirtxml"
+
 	cloudinit "kubevirt.io/kubevirt/pkg/cloud-init"
 	hooksInfo "kubevirt.io/kubevirt/pkg/hooks/info"
 	hooksV1alpha1 "kubevirt.io/kubevirt/pkg/hooks/v1alpha1"
@@ -267,39 +269,42 @@ func (m *hookManager) onDefineDomainCallback(callback *callBackClient, domainSpe
 	switch callback.Version {
 	case hooksV1alpha1.Version:
 		client := hooksV1alpha1.NewCallbacksClient(conn)
-		result, err := client.OnDefineDomain(ctx, &hooksV1alpha1.OnDefineDomainParams{
+		var result *hooksV1alpha1.OnDefineDomainResult
+		result, err = client.OnDefineDomain(ctx, &hooksV1alpha1.OnDefineDomainParams{
 			DomainXML: domainSpecXML,
 			Vmi:       vmiJSON,
 		})
-		if err != nil {
-			log.Log.Reason(err).Error("Failed to call OnDefineDomain")
-			return nil, err
-		}
 		domainSpecXML = result.GetDomainXML()
 	case hooksV1alpha2.Version:
 		client := hooksV1alpha2.NewCallbacksClient(conn)
-		result, err := client.OnDefineDomain(ctx, &hooksV1alpha2.OnDefineDomainParams{
+		var result *hooksV1alpha2.OnDefineDomainResult
+		result, err = client.OnDefineDomain(ctx, &hooksV1alpha2.OnDefineDomainParams{
 			DomainXML: domainSpecXML,
 			Vmi:       vmiJSON,
 		})
-		if err != nil {
-			log.Log.Reason(err).Error("Failed to call OnDefineDomain")
-			return nil, err
-		}
 		domainSpecXML = result.GetDomainXML()
 	case hooksV1alpha3.Version:
 		client := hooksV1alpha3.NewCallbacksClient(conn)
-		result, err := client.OnDefineDomain(ctx, &hooksV1alpha3.OnDefineDomainParams{
+		var result *hooksV1alpha3.OnDefineDomainResult
+		result, err = client.OnDefineDomain(ctx, &hooksV1alpha3.OnDefineDomainParams{
 			DomainXML: domainSpecXML,
 			Vmi:       vmiJSON,
 		})
-		if err != nil {
-			log.Log.Reason(err).Error("Failed to call OnDefineDomain")
-			return nil, err
-		}
 		domainSpecXML = result.GetDomainXML()
 	default:
 		log.Log.Errorf("Unsupported callback version: %s", callback.Version)
+	}
+
+	if err != nil {
+		log.Log.Reason(err).Error("Failed to call OnDefineDomain")
+		return nil, err
+	}
+
+	// Should always be a valid libvirtxml Domain
+	domcfg := &libvirtxml.Domain{}
+	if err = domcfg.Unmarshal(string(domainSpecXML)); err != nil {
+		log.Log.Reason(err).Error("Failed to Unmarshal resulting domain XML")
+		return nil, err
 	}
 
 	return domainSpecXML, nil
