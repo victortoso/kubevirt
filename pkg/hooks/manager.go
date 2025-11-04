@@ -367,57 +367,61 @@ func (m *hookManager) PreCloudInitIso(vmi *v1.VirtualMachineInstance, cloudInitD
 		return cloudInitData, err
 	}
 
+	// FIXME: We only running the very first one. This could be an issue with multiple sidecars.
 	for _, callback := range callbacks {
-		switch callback.Version {
-		case hooksV1alpha2.Version:
-			conn, err := grpcutil.DialSocketWithTimeout(callback.SocketPath, 1)
-			if err != nil {
-				log.Log.Reason(err).Errorf(dialSockErr, callback.SocketPath)
-				return cloudInitData, err
-			}
-			defer conn.Close()
-
-			client := hooksV1alpha2.NewCallbacksClient(conn)
-			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-			defer cancel()
-
-			result, err := client.PreCloudInitIso(ctx, &hooksV1alpha2.PreCloudInitIsoParams{
-				CloudInitData:          cloudInitDataJSON,
-				CloudInitNoCloudSource: cloudInitNoCloudSourceJSON,
-				Vmi:                    vmiJSON,
-			})
-			if err != nil {
-				log.Log.Reason(err).Error("Failed to call PreCloudInitIso")
-				return cloudInitData, err
-			}
-			return preCloudInitIsoValidateResult(cloudInitData.DataSource, result.GetCloudInitData(), result.GetCloudInitNoCloudSource())
-		case hooksV1alpha3.Version:
-			conn, err := grpcutil.DialSocketWithTimeout(callback.SocketPath, 1)
-			if err != nil {
-				log.Log.Reason(err).Errorf(dialSockErr, callback.SocketPath)
-				return cloudInitData, err
-			}
-			defer conn.Close()
-
-			client := hooksV1alpha3.NewCallbacksClient(conn)
-			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-			defer cancel()
-
-			result, err := client.PreCloudInitIso(ctx, &hooksV1alpha3.PreCloudInitIsoParams{
-				CloudInitData:          cloudInitDataJSON,
-				CloudInitNoCloudSource: cloudInitNoCloudSourceJSON,
-				Vmi:                    vmiJSON,
-			})
-			if err != nil {
-				log.Log.Reason(err).Error("Failed to call PreCloudInitIso")
-				return cloudInitData, err
-			}
-			return preCloudInitIsoValidateResult(cloudInitData.DataSource, result.GetCloudInitData(), result.GetCloudInitNoCloudSource())
-		default:
-			log.Log.Errorf("Unsupported callback version: %s", callback.Version)
+		if val, err := m.preCloudInitIsoCallback(callback, cloudInitData.DataSource, cloudInitDataJSON, cloudInitNoCloudSourceJSON, vmiJSON); err != nil {
+			log.Log.Reason(err).Error("Failed to run PreCloudInitIso callback")
+			return cloudInitData, err
+		} else {
+			return val, nil
 		}
 	}
 	return cloudInitData, nil
+}
+
+func (m *hookManager) preCloudInitIsoCallback(callback *callBackClient, dataSource cloudinit.DataSourceType, data, source, vmi []byte) (*cloudinit.CloudInitData, error) {
+	conn, err := grpcutil.DialSocketWithTimeout(callback.SocketPath, 1)
+	if err != nil {
+		log.Log.Reason(err).Errorf(dialSockErr, callback.SocketPath)
+		return nil, err
+	}
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	switch callback.Version {
+	case hooksV1alpha2.Version:
+		client := hooksV1alpha2.NewCallbacksClient(conn)
+
+		result, err := client.PreCloudInitIso(ctx, &hooksV1alpha2.PreCloudInitIsoParams{
+			CloudInitData:          data,
+			CloudInitNoCloudSource: source,
+			Vmi:                    vmi,
+		})
+		if err != nil {
+			log.Log.Reason(err).Error("Failed to call PreCloudInitIso")
+			return nil, err
+		}
+		return preCloudInitIsoValidateResult(dataSource, result.GetCloudInitData(), result.GetCloudInitNoCloudSource())
+
+	case hooksV1alpha3.Version:
+		client := hooksV1alpha3.NewCallbacksClient(conn)
+
+		result, err := client.PreCloudInitIso(ctx, &hooksV1alpha3.PreCloudInitIsoParams{
+			CloudInitData:          data,
+			CloudInitNoCloudSource: source,
+			Vmi:                    vmi,
+		})
+		if err != nil {
+			log.Log.Reason(err).Error("Failed to call PreCloudInitIso")
+			return nil, err
+		}
+		return preCloudInitIsoValidateResult(dataSource, result.GetCloudInitData(), result.GetCloudInitNoCloudSource())
+
+	default:
+		return nil, fmt.Errorf("Unsupported callback version: %s", callback.Version)
+	}
 }
 
 func (m *hookManager) Shutdown() error {
@@ -425,27 +429,36 @@ func (m *hookManager) Shutdown() error {
 	if !found {
 		return nil
 	}
+
+	// FIXME: On failure, we return early. We should call all callbacks before returning.
 	for _, callback := range callbacks {
-		switch callback.Version {
-		case hooksV1alpha3.Version:
-			conn, err := grpcutil.DialSocketWithTimeout(callback.SocketPath, 1)
-			if err != nil {
-				log.Log.Reason(err).Error("Failed to run Shutdown")
-				return err
-			}
-			defer conn.Close()
-
-			client := hooksV1alpha3.NewCallbacksClient(conn)
-			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-			defer cancel()
-
-			if _, err := client.Shutdown(ctx, &hooksV1alpha3.ShutdownParams{}); err != nil {
-				log.Log.Reason(err).Error("Failed to run Shutdown")
-				return err
-			}
-		default:
-			log.Log.Errorf("Unsupported callback version: %s", callback.Version)
+		if err := m.shutdownCallback(callback); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+func (m *hookManager) shutdownCallback(callback *callBackClient) error {
+	conn, err := grpcutil.DialSocketWithTimeout(callback.SocketPath, 1)
+	if err != nil {
+		log.Log.Reason(err).Error("Failed to run Shutdown")
+		return err
+	}
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	switch callback.Version {
+	case hooksV1alpha3.Version:
+		client := hooksV1alpha3.NewCallbacksClient(conn)
+		if _, err := client.Shutdown(ctx, &hooksV1alpha3.ShutdownParams{}); err != nil {
+			log.Log.Reason(err).Error("Failed to run Shutdown")
+			return err
+		}
+	default:
+		log.Log.Errorf("Unsupported callback version: %s", callback.Version)
 	}
 	return nil
 }
