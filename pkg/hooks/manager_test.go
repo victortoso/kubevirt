@@ -42,9 +42,7 @@ import (
 )
 
 type infoServer struct {
-	hookName          string
-	hookPointName     string
-	hookPointPriority int32
+	hooksInfo.InfoResult
 }
 
 func (s infoServer) Info(
@@ -52,19 +50,8 @@ func (s infoServer) Info(
 	_ *hooksInfo.InfoParams,
 ) (*hooksInfo.InfoResult, error) {
 	GinkgoWriter.Println("Hook's Info method has been called")
-
-	return &hooksInfo.InfoResult{
-		Name: s.hookName,
-		Versions: []string{
-			hooksV1alpha3.Version,
-		},
-		HookPoints: []*hooksInfo.HookPoint{
-			{
-				Name:     s.hookPointName,
-				Priority: s.hookPointPriority,
-			},
-		},
-	}, nil
+	p := hooksInfo.InfoResult(s)
+	return &p, nil
 }
 
 type callbackServer struct {
@@ -109,9 +96,14 @@ func hookListenAndServe(socketPath string, hookName string, hookPointName string
 
 	server := grpc.NewServer([]grpc.ServerOption{}...)
 	hooksInfo.RegisterInfoServer(server, infoServer{
-		hookName:          hookName,
-		hookPointName:     hookPointName,
-		hookPointPriority: hookPointPriority,
+		Name:     hookName,
+		Versions: []string{hooksV1alpha3.Version},
+		HookPoints: []*hooksInfo.HookPoint{
+			{
+				Name:     hookPointName,
+				Priority: hookPointPriority,
+			},
+		},
 	})
 	hooksV1alpha3.RegisterCallbacksServer(server, callbackServer{done: make(chan struct{})})
 	go func() {
