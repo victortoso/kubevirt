@@ -27,13 +27,14 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strconv"
 	"time"
 
 	"google.golang.org/grpc"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	"k8s.io/apimachinery/pkg/util/rand"
 
 	v1 "kubevirt.io/api/core/v1"
 	hooksInfo "kubevirt.io/kubevirt/pkg/hooks/info"
@@ -50,8 +51,7 @@ func (s infoServer) Info(
 	_ *hooksInfo.InfoParams,
 ) (*hooksInfo.InfoResult, error) {
 	GinkgoWriter.Println("Hook's Info method has been called")
-	p := hooksInfo.InfoResult(s)
-	return &p, nil
+	return &s.InfoResult, nil
 }
 
 type callbackServer struct {
@@ -88,29 +88,80 @@ func (s callbackServer) Shutdown(
 	return &hooksV1alpha3.ShutdownResult{}, nil
 }
 
-func hookListenAndServe(socketPath string, hookName string, hookPointName string, hookPointPriority int32) (net.Listener, error) {
-	socket, err := net.Listen("unix", socketPath)
-	if err != nil {
-		return nil, err
-	}
+type testCase struct {
+	socketPath string
+	info       infoServer
+	callback   callbackServer
 
-	server := grpc.NewServer([]grpc.ServerOption{}...)
-	hooksInfo.RegisterInfoServer(server, infoServer{
-		Name:     hookName,
-		Versions: []string{hooksV1alpha3.Version},
-		HookPoints: []*hooksInfo.HookPoint{
-			{
-				Name:     hookPointName,
-				Priority: hookPointPriority,
+	// error from the Run(), will be read on Stop()
+	errch  chan error
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+// Create boilerplate for the test
+func newTestCase(socketDir, name string) *testCase {
+	hookPath := filepath.Join(socketDir, "hook-sidecar-"+rand.String(5))
+	os.MkdirAll(hookPath, os.ModePerm)
+	socketPath := filepath.Join(hookPath, fmt.Sprintf("%s.sock", name))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	return &testCase{
+		socketPath: socketPath,
+		info: infoServer{
+			hooksInfo.InfoResult{
+				Name:       name,
+				Versions:   []string{hooksV1alpha3.Version},
+				HookPoints: []*hooksInfo.HookPoint{},
 			},
 		},
-	})
-	hooksV1alpha3.RegisterCallbacksServer(server, callbackServer{done: make(chan struct{})})
+		callback: callbackServer{
+			done: make(chan struct{}),
+		},
+		errch:  make(chan error),
+		ctx:    ctx,
+		cancel: cancel,
+	}
+}
+
+func (t *testCase) Run() {
+	socket, err := net.Listen("unix", t.socketPath)
+	Expect(err).ToNot(HaveOccurred())
+	defer socket.Close()
+
+	server := grpc.NewServer([]grpc.ServerOption{}...)
+
+	hooksInfo.RegisterInfoServer(server, t.info)
+	hooksV1alpha3.RegisterCallbacksServer(server, t.callback)
+
+	grpcDone := make(chan error)
 	go func() {
-		GinkgoWriter.Printf("Starting hook server exposing 'info' services on socket %s\n", socketPath)
-		server.Serve(socket)
+		GinkgoWriter.Printf("Starting hook server exposing 'info' services on socket %s\n", t.socketPath)
+		grpcDone <- server.Serve(socket)
 	}()
-	return socket, nil
+
+	select {
+	case err = <-grpcDone:
+	case <-t.ctx.Done():
+		err = t.ctx.Err()
+	}
+
+	// Wait Stop() read it
+	t.errch <- err
+}
+
+func (t *testCase) Stop() error {
+	defer os.Remove(t.socketPath)
+
+	// Check if error already
+	select {
+	case err := <-t.errch:
+		return err
+	default:
+	}
+
+	t.cancel()
+	return <-t.errch
 }
 
 //go:embed testdata/domain.xml
@@ -130,16 +181,16 @@ var _ = Describe("HooksManager", func() {
 		It("Should find sidecar", func() {
 			hookPointName := hooksInfo.OnDefineDomainHookPointName
 
-			hookPath := filepath.Join(socketDir, "hook-sidecar-0")
-			os.MkdirAll(hookPath, os.ModePerm)
-			socketPath := filepath.Join(hookPath, "hook1.sock")
-			socket, err := hookListenAndServe(socketPath, "hook1", hookPointName, 0)
-			Expect(err).ToNot(HaveOccurred())
-			defer socket.Close()
-			defer os.Remove(socketPath)
+			t := newTestCase(socketDir, "hook1")
+			t.info.HookPoints = append(t.info.HookPoints, &hooksInfo.HookPoint{
+				Name:     hookPointName,
+				Priority: 0,
+			})
+			go t.Run()
+			defer t.Stop()
 
 			manager := newManager(socketDir)
-			err = manager.Collect(1, 10*time.Second)
+			err := manager.Collect(1, 10*time.Second)
 			Expect(err).ToNot(HaveOccurred())
 
 			callbackMaps := manager.CallbacksPerHookPoint
@@ -151,14 +202,14 @@ var _ = Describe("HooksManager", func() {
 			hookPointName := hooksInfo.OnDefineDomainHookPointName
 			hookNames := []string{"hook1", "hook2"}
 
-			for i, hookName := range hookNames {
-				hookPath := filepath.Join(socketDir, "hook-sidecar-"+strconv.Itoa(i))
-				os.MkdirAll(hookPath, os.ModePerm)
-				socketPath := filepath.Join(hookPath, fmt.Sprintf("%s.sock", hookName))
-				socket, err := hookListenAndServe(socketPath, hookName, hookPointName, 0)
-				Expect(err).ToNot(HaveOccurred())
-				defer socket.Close()
-				defer os.Remove(socketPath)
+			for _, hookName := range hookNames {
+				t := newTestCase(socketDir, hookName)
+				go t.Run()
+				t.info.HookPoints = append(t.info.HookPoints, &hooksInfo.HookPoint{
+					Name:     hookPointName,
+					Priority: 0,
+				})
+				defer t.Stop()
 			}
 
 			manager := newManager(socketDir)
@@ -178,14 +229,14 @@ var _ = Describe("HooksManager", func() {
 				{"hook1", hooksInfo.OnDefineDomainHookPointName},
 				{"hook2", hooksInfo.PreCloudInitIsoHookPointName},
 			}
-			for i, hook := range hookNameList {
-				hookPath := filepath.Join(socketDir, "hook-sidecar-"+strconv.Itoa(i))
-				os.MkdirAll(hookPath, os.ModePerm)
-				socketPath := filepath.Join(hookPath, fmt.Sprintf("%s.sock", hook.hookName))
-				socket, err := hookListenAndServe(socketPath, hook.hookName, hook.hookPointName, 0)
-				Expect(err).ToNot(HaveOccurred())
-				defer socket.Close()
-				defer os.Remove(socketPath)
+			for _, hook := range hookNameList {
+				t := newTestCase(socketDir, hook.hookName)
+				go t.Run()
+				t.info.HookPoints = append(t.info.HookPoints, &hooksInfo.HookPoint{
+					Name:     hook.hookPointName,
+					Priority: 0,
+				})
+				defer t.Stop()
 			}
 
 			manager := newManager(socketDir)
@@ -204,16 +255,16 @@ var _ = Describe("HooksManager", func() {
 			It("should call OnDefineDomain", func() {
 				hookPointName := hooksInfo.OnDefineDomainHookPointName
 
-				hookPath := filepath.Join(socketDir, "hook-sidecar-0")
-				os.MkdirAll(hookPath, os.ModePerm)
-				socketPath := filepath.Join(hookPath, "hook1.sock")
-				socket, err := hookListenAndServe(socketPath, "hook1", hookPointName, 0)
-				Expect(err).ToNot(HaveOccurred())
-				defer socket.Close()
-				defer os.Remove(socketPath)
+				t := newTestCase(socketDir, "hook1")
+				t.info.HookPoints = append(t.info.HookPoints, &hooksInfo.HookPoint{
+					Name:     hookPointName,
+					Priority: 0,
+				})
+				go t.Run()
+				defer t.Stop()
 
 				manager := newManager(socketDir)
-				err = manager.Collect(1, 10*time.Second)
+				err := manager.Collect(1, 10*time.Second)
 				Expect(err).ToNot(HaveOccurred())
 
 				callbackMaps := manager.CallbacksPerHookPoint
