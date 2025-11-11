@@ -41,13 +41,16 @@ import (
 	virtwrapApi "kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
 )
 
-type dynamicInfoServer struct {
+type infoServer struct {
 	hookName          string
 	hookPointName     string
 	hookPointPriority int32
 }
 
-func (s dynamicInfoServer) Info(ctx context.Context, params *hooksInfo.InfoParams) (*hooksInfo.InfoResult, error) {
+func (s infoServer) Info(
+	_ context.Context,
+	_ *hooksInfo.InfoParams,
+) (*hooksInfo.InfoResult, error) {
 	GinkgoWriter.Println("Hook's Info method has been called")
 
 	return &hooksInfo.InfoResult{
@@ -105,7 +108,7 @@ func hookListenAndServe(socketPath string, hookName string, hookPointName string
 	}
 
 	server := grpc.NewServer([]grpc.ServerOption{}...)
-	hooksInfo.RegisterInfoServer(server, dynamicInfoServer{
+	hooksInfo.RegisterInfoServer(server, infoServer{
 		hookName:          hookName,
 		hookPointName:     hookPointName,
 		hookPointPriority: hookPointPriority,
